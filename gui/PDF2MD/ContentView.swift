@@ -186,7 +186,3 @@ struct ContentView: View {
         processador.limpar()
     }
 }
-
-#Preview {
-    ContentView()
-}
