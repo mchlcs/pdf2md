@@ -5,7 +5,7 @@ Paraleliza via ProcessPoolExecutor.
 from pathlib import Path
 from dataclasses import dataclass
 from enum import Enum
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 
 from core.utils import EXTENSOES_PDF, EXTENSOES_IMAGEM, EXTENSOES_PERMITIDAS, validar_path_seguro
@@ -172,9 +172,10 @@ def batch_convert(
         destino_arq = destino / nome_md
         tarefas.append((arq, destino_arq))
 
-    # Executa em paralelo
+    # Executa em paralelo via threads (compatível com PyInstaller one-file)
+    # fitz e pytesseract liberam GIL em operações C, então threads têm paralelismo real
     if tarefas:
-        with ProcessPoolExecutor(max_workers=workers) as executor:
+        with ThreadPoolExecutor(max_workers=workers) as executor:
             futures = {
                 executor.submit(
                     _processar_arquivo,

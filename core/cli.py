@@ -144,3 +144,7 @@ def converter(
             f"[red]Erros:[/red] {erros} | "
             f"[yellow]Ignorados:[/yellow] {ignorados}"
         )
+
+
+if __name__ == "__main__":
+    app()
