@@ -9,30 +9,30 @@ on:
 jobs:
   test:
     runs-on: macos-latest
+
     steps:
       - uses: actions/checkout@v4
 
-      - name: Instalar uv
-        uses: astral-sh/setup-uv@v4
-        with:
-          version: "latest"
-
       - name: Instalar Python 3.12
-        run: uv python install 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
-      - name: Instalar dependências
-        run: uv pip install -e ".[dev]"
+      - name: Instalar Tesseract e antiword (OCR + Word legado)
+        run: brew install tesseract tesseract-lang antiword
+
+      - name: Instalar dependências Python
+        run: pip install -e ".[dev]"
 
       - name: Lint (ruff)
-        run: uv run ruff check core/ tests/
+        run: ruff check core/ tests/
 
       - name: Testes
-        run: uv run pytest tests/ -v --cov=core --cov-report=term-missing
+        run: pytest tests/ -v --cov=core --cov-report=term-missing
 
       - name: Auditoria de dependências (pip-audit)
-        run: uv run pip-audit
+        run: pip-audit
 
       - name: Scan de segredos (detect-secrets)
         run: |
-          uv run detect-secrets scan --baseline .secrets.baseline
-          uv run detect-secrets audit .secrets.baseline --report || echo "Sem novos segredos detectados"
+          detect-secrets scan --baseline .secrets.baseline
