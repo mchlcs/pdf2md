@@ -53,8 +53,12 @@ def pdf_to_md(path: Path) -> str:
             texto_pagina = pagina.get_text()
 
             if len(texto_pagina.strip()) >= 50:
-                # Página com texto suficiente — usa pymupdf4llm para esta página
-                md_pagina = pymupdf4llm.to_markdown(doc, pages=[num_pagina])
+                # Página com texto suficiente — tenta pymupdf4llm (melhor formatação MD)
+                md_pagina = pymupdf4llm.to_markdown(str(path), pages=[num_pagina])
+                if not md_pagina.strip():
+                    # pymupdf4llm retornou vazio (ex: layout multi-coluna complexo)
+                    # fallback: texto nativo do fitz, preserva conteúdo sem formatação MD
+                    md_pagina = texto_pagina.strip()
                 partes.append(md_pagina)
             else:
                 # Página sem texto ou pouco texto — renderiza e OCR

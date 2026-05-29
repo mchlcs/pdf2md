@@ -53,7 +53,7 @@ def image_to_md(path: Path) -> str:
         ValueError: Se extensão não está em EXTENSOES_IMAGEM.
         RuntimeError: Se Tesseract não está instalado.
     """
-        if not path.exists():
+    if not path.exists():
         raise FileNotFoundError(f"Arquivo não encontrado: {path.name}")
 
     if path.suffix.lower() not in EXTENSOES_IMAGEM:

@@ -128,6 +128,9 @@ def batch_convert(
         FileNotFoundError: Se `origem` não existe.
         NotADirectoryError: Se `vault` definido mas não é diretório.
     """
+    # Valida traversal antes de qualquer I/O — previne ../../etc/passwd.pdf
+    validar_path_seguro(origem)
+
     if not origem.exists():
         raise FileNotFoundError(f"Origem não encontrada: {origem.name}")
 
@@ -145,9 +148,9 @@ def batch_convert(
     else:
         arquivos = sorted(origem.iterdir())
 
-    # Valida paths de segurança — restringe ao diretório home do usuário
+    # Valida traversal em cada arquivo coletado
     for arq in arquivos:
-        validar_path_seguro(arq, base_permitida=Path.home())
+        validar_path_seguro(arq)
 
     # Prepara tarefas
     tarefas: list[tuple[Path, Path]] = []

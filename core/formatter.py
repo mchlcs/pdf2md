@@ -42,7 +42,7 @@ def add_obsidian_frontmatter(
     frontmatter = {
         "title": source.stem,
         "source": source.name,
-        "converted": date.today().isoformat(),
+        "converted": date.today(),  # objeto date → PyYAML serializa sem aspas: "2026-05-29"
         "tags": tags_finais,
     }
 

@@ -47,8 +47,8 @@ def test_heic_captura_tela(tmp_path):
         ic.verificar_tesseract = original
 
 
-def test_imagem_sem_texto(fixture_img_sem_texto, mock_tesseract):
-    """Imagem branca → string vazia."""
+def test_imagem_sem_texto(fixture_img_sem_texto):
+    """Imagem branca → string vazia (usa Tesseract real, imagem sem texto)."""
     md = image_to_md(fixture_img_sem_texto)
     assert md.strip() == ""
 
