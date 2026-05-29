@@ -8,9 +8,10 @@ from enum import Enum
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 
-from core.utils import EXTENSOES_PDF, EXTENSOES_IMAGEM, EXTENSOES_PERMITIDAS, validar_path_seguro
+from core.utils import EXTENSOES_PDF, EXTENSOES_IMAGEM, EXTENSOES_DOC, EXTENSOES_PERMITIDAS, validar_path_seguro
 from core.converter import pdf_to_md
 from core.image_converter import image_to_md
+from core.doc_converter import doc_to_md
 from core.formatter import add_obsidian_frontmatter
 
 
@@ -53,10 +54,13 @@ def _processar_arquivo(
         }
 
     try:
-        if origem.suffix.lower() in EXTENSOES_PDF:
+        sufixo = origem.suffix.lower()
+        if sufixo in EXTENSOES_PDF:
             md = pdf_to_md(origem)
-        elif origem.suffix.lower() in EXTENSOES_IMAGEM:
+        elif sufixo in EXTENSOES_IMAGEM:
             md = image_to_md(origem)
+        elif sufixo in EXTENSOES_DOC:
+            md = doc_to_md(origem)
         else:
             return {
                 "origem": origem_str,

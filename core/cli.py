@@ -18,7 +18,7 @@ from core.utils import validar_path_seguro
 
 app = typer.Typer(
     name="pdf2md",
-    help="Converte PDFs e imagens em Markdown. Suporte a batch e Obsidian vault.",
+    help="Converte PDFs, imagens e documentos Word em Markdown. Suporte a batch e Obsidian vault.",
     add_completion=False,
 )
 console = Console(stderr=True)

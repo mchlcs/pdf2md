@@ -104,7 +104,7 @@ struct ContentView: View {
                 Text("Arraste PDFs e imagens aqui")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
-                Text("PDF · PNG · JPG · TIFF · WEBP · BMP · HEIC")
+                Text("PDF · DOCX · DOC · PNG · JPG · TIFF · WEBP · BMP · HEIC")
                     .font(.caption2)
                     .foregroundColor(.secondary.opacity(0.6))
             }

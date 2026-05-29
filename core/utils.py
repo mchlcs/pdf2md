@@ -8,7 +8,8 @@ EXTENSOES_PDF: frozenset[str] = frozenset({".pdf"})
 EXTENSOES_IMAGEM: frozenset[str] = frozenset({
     ".png", ".jpg", ".jpeg", ".tiff", ".tif", ".webp", ".bmp", ".heic"
 })
-EXTENSOES_PERMITIDAS: frozenset[str] = EXTENSOES_PDF | EXTENSOES_IMAGEM
+EXTENSOES_DOC: frozenset[str] = frozenset({".doc", ".docx"})
+EXTENSOES_PERMITIDAS: frozenset[str] = EXTENSOES_PDF | EXTENSOES_IMAGEM | EXTENSOES_DOC
 
 
 def validar_path_seguro(path: Path, base_permitida: Path | None = None) -> Path:
