@@ -2,17 +2,22 @@
 Orquestra conversão em batch de múltiplos arquivos (PDFs e imagens).
 Paraleliza via ProcessPoolExecutor.
 """
-from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from enum import Enum
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import json
+from pathlib import Path
 
-from core.utils import EXTENSOES_PDF, EXTENSOES_IMAGEM, EXTENSOES_DOC, EXTENSOES_PERMITIDAS, validar_path_seguro
 from core.converter import pdf_to_md
-from core.image_converter import image_to_md
 from core.doc_converter import doc_to_md
 from core.formatter import add_obsidian_frontmatter
+from core.image_converter import image_to_md
+from core.utils import (
+    EXTENSOES_DOC,
+    EXTENSOES_IMAGEM,
+    EXTENSOES_PDF,
+    EXTENSOES_PERMITIDAS,
+    validar_path_seguro,
+)
 
 
 class StatusArquivo(Enum):
@@ -147,10 +152,7 @@ def batch_convert(
     destino.mkdir(parents=True, exist_ok=True)
 
     # Coleta arquivos
-    if origem.is_file():
-        arquivos = [origem]
-    else:
-        arquivos = sorted(origem.iterdir())
+    arquivos = [origem] if origem.is_file() else sorted(origem.iterdir())
 
     # Valida traversal em cada arquivo coletado
     for arq in arquivos:

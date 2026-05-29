@@ -5,8 +5,8 @@ Estratégia:
 - .docx → mammoth.convert_to_markdown() (estrutura preservada: headers, bold, listas)
 - .doc  → antiword via subprocess (texto plano; requer: brew install antiword)
 """
-from pathlib import Path
 import subprocess
+from pathlib import Path
 
 EXTENSOES_DOC: frozenset[str] = frozenset({".doc", ".docx"})
 
@@ -46,10 +46,10 @@ def _docx_para_md(path: Path) -> str:
         with open(path, "rb") as f:
             resultado = mammoth.convert_to_markdown(f)
         return resultado.value.strip()
-    except ImportError:
+    except ImportError as exc:
         raise RuntimeError(
             "mammoth não encontrado. Instale com: pip install mammoth"
-        )
+        ) from exc
     except Exception as exc:
         raise RuntimeError(
             f"Falha ao converter {path.name} — arquivo corrompido ou formato inválido"
@@ -71,17 +71,17 @@ def _doc_para_md(path: Path) -> str:
         # tenta tratar como .docx
         try:
             return _docx_para_md(path)
-        except Exception:
+        except Exception as exc_inner:
             raise RuntimeError(
                 f"Falha ao converter {path.name} — "
                 f"antiword: {resultado.stderr.strip()}"
-            )
-    except FileNotFoundError:
+            ) from exc_inner
+    except FileNotFoundError as exc:
         raise RuntimeError(
             "antiword não encontrado. "
             "Instale com: brew install antiword"
-        )
-    except subprocess.TimeoutExpired:
+        ) from exc
+    except subprocess.TimeoutExpired as exc:
         raise RuntimeError(
             f"Timeout ao converter {path.name} — arquivo muito grande ou corrompido"
-        )
+        ) from exc

@@ -1,10 +1,10 @@
 """
 Fixtures e utilitários para testes do pdf2md.
 """
-import pytest
-from pathlib import Path
-from PIL import Image, ImageDraw
+
 import fitz  # PyMuPDF
+import pytest
+from PIL import Image, ImageDraw
 
 
 @pytest.fixture(scope="session")

@@ -34,8 +34,8 @@ def validar_path_seguro(path: Path, base_permitida: Path | None = None) -> Path:
         base_resolvida = base_permitida.resolve()
         try:
             path_resolvido.relative_to(base_resolvida)
-        except ValueError:
-            raise ValueError(f"Path fora do diretório permitido: {path}")
+        except ValueError as exc:
+            raise ValueError(f"Path fora do diretório permitido: {path}") from exc
     return path_resolvido
 
 

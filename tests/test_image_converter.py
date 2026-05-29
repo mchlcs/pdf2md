@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from core.image_converter import image_to_md, verificar_tesseract, EXTENSOES_IMAGEM
+from core.image_converter import image_to_md
 
 
 def test_png_texto_claro(fixture_img_texto, mock_tesseract):

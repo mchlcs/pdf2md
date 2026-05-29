@@ -1,8 +1,8 @@
 """Testes para core/converter.py."""
 from pathlib import Path
 
-import pytest
 import fitz
+import pytest
 from PIL import Image, ImageDraw
 
 from core.converter import pdf_to_md

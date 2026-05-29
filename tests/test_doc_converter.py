@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from core.doc_converter import doc_to_md, EXTENSOES_DOC
+from core.doc_converter import EXTENSOES_DOC, doc_to_md
 
 
 def _criar_docx_simples(path: Path, texto: str = "Conteúdo de teste Word.") -> None:
@@ -74,7 +74,7 @@ def test_extensoes_doc_set():
 
 def test_batch_docx(tmp_path):
     """batch_convert processa .docx corretamente."""
-    from core.batch import batch_convert, StatusArquivo
+    from core.batch import StatusArquivo, batch_convert
     path = tmp_path / "entrada" / "doc.docx"
     path.parent.mkdir()
     _criar_docx_simples(path)
@@ -91,7 +91,7 @@ def test_batch_docx(tmp_path):
 
 def test_batch_doc_extensao_reconhecida(tmp_path):
     """batch_convert tenta processar .doc (não ignora a extensão)."""
-    from core.batch import batch_convert, StatusArquivo
+    from core.batch import StatusArquivo, batch_convert
     path = tmp_path / "entrada" / "doc.doc"
     path.parent.mkdir()
     # Cria um "doc" que na verdade é docx (Word 2003 XML seria muito complexo)

@@ -1,6 +1,6 @@
 """Testes para core/formatter.py."""
-from pathlib import Path
 from datetime import date
+from pathlib import Path
 
 import yaml
 

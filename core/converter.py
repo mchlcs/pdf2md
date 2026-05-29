@@ -2,14 +2,13 @@
 Converte arquivos PDF em Markdown.
 Detecta automaticamente páginas com imagem e aplica OCR.
 """
-from pathlib import Path
 import tempfile
+from pathlib import Path
 
 import fitz  # PyMuPDF
 import pymupdf4llm
 
-from core.image_converter import image_to_md, _configurar_tesseract_cmd
-from core.utils import validar_extensao
+from core.image_converter import _configurar_tesseract_cmd, image_to_md
 
 
 def pdf_to_md(path: Path) -> str:

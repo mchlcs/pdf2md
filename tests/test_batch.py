@@ -1,11 +1,10 @@
 """Testes para core/batch.py."""
-from pathlib import Path
 
-import pytest
 import fitz
+import pytest
 from PIL import Image, ImageDraw
 
-from core.batch import batch_convert, StatusArquivo, ResultadoArquivo
+from core.batch import StatusArquivo, batch_convert
 
 
 def test_batch_arquivo_unico(fixture_texto_simples, tmp_path):

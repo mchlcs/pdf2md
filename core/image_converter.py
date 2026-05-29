@@ -31,6 +31,7 @@ def _configurar_tesseract_cmd() -> None:
     Chamado uma vez no início — sem efeito se tesseract já está no PATH.
     """
     import shutil
+
     import pytesseract
 
     # Já acessível no PATH atual — não precisa configurar

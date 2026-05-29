@@ -5,13 +5,13 @@ Uso: pdf2md INPUT OUTPUT [opções]
      pdf2md pasta/pdfs/ pasta/markdowns/ --workers 8
      pdf2md docs/ --vault ~/Obsidian/vault-michel
 """
-import sys
 import json
+import sys
 from pathlib import Path
 
 import typer
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, MofNCompleteColumn
+from rich.progress import BarColumn, MofNCompleteColumn, Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
 from core.utils import validar_path_seguro
@@ -48,7 +48,7 @@ def converter(
     --vault implica --obsidian automaticamente.
     """
     # Lazy imports: só carrega deps pesadas quando o comando é executado
-    from core.batch import batch_convert, StatusArquivo
+    from core.batch import StatusArquivo, batch_convert
     from core.image_converter import verificar_tesseract
 
     # Validação de segurança
@@ -59,7 +59,7 @@ def converter(
         validar_path_seguro(destino)
     except ValueError as exc:
         console.print(f"[red]Erro de validação: {exc}[/red]")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from exc
 
     # Verifica Tesseract
     if not verificar_tesseract():
@@ -97,7 +97,7 @@ def converter(
             progress.update(task, total=len(resultados), completed=len(resultados))
     except (FileNotFoundError, NotADirectoryError) as exc:
         console.print(f"[red]Erro: {exc}[/red]")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from exc
 
     # Progresso / JSON
     if json_output:

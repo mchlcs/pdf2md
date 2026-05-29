@@ -1,8 +1,8 @@
 """
 Adiciona frontmatter YAML compatível com Obsidian ao início de um Markdown.
 """
-from pathlib import Path
 from datetime import date
+from pathlib import Path
 
 import yaml
 
