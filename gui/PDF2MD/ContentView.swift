@@ -6,127 +6,221 @@ import UniformTypeIdentifiers
 struct ContentView: View {
     @StateObject private var processador = BatchProcessor()
     @State private var arquivosSelecionados: [URL] = []
-    @State private var pastaDestino: URL?
+    @State private var caminho: URL?          // único campo: pasta saída ou vault
     @State private var modoObsidian: Bool = false
-    @State private var vaultPath: URL?
     @State private var isDragOver: Bool = false
+    @State private var tarefaConversao: Task<Void, Never>?
+
+    // Label e picker mudam conforme modo
+    private var labelCaminho: String {
+        modoObsidian ? "Vault Obsidian" : "Pasta de saída"
+    }
+    private var placeholderCaminho: String {
+        modoObsidian ? "Selecionar vault…" : "Selecionar pasta…"
+    }
+    private var mensagemPicker: String {
+        modoObsidian ? "Selecione a raiz do vault Obsidian" : "Selecione a pasta de saída"
+    }
 
     var body: some View {
-        VStack(spacing: 20) {
-            // Zona drag-drop
-            ZStack {
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(isDragOver ? Color.blue : Color.gray, lineWidth: 2)
-                    .background(isDragOver ? Color.blue.opacity(0.1) : Color.clear)
-                    .frame(height: 120)
+        VStack(spacing: 0) {
+            // Header com logo
+            cabecalho
 
-                VStack {
-                    Image(systemName: "doc.badge.arrow.up")
-                        .font(.system(size: 40))
-                        .foregroundColor(isDragOver ? .blue : .gray)
-                    Text("Arraste PDFs e imagens aqui")
-                        .foregroundColor(.secondary)
-                }
-            }
-            .onDrop(of: [UTType.fileURL.identifier], isTargeted: $isDragOver) { providers in
-                handleDrop(providers: providers)
-                return true
-            }
+            Divider()
 
-            // Lista de arquivos
-            if !arquivosSelecionados.isEmpty {
-                List(arquivosSelecionados, id: \.self) { url in
-                    HStack {
-                        statusIcon(for: url)
-                        Text(url.lastPathComponent)
-                            .lineLimit(1)
-                        Spacer()
+            ScrollView {
+                VStack(spacing: 16) {
+                    // Zona drag-drop
+                    zonaArrastar
+                        .padding(.top, 16)
+
+                    // Lista de arquivos
+                    if !arquivosSelecionados.isEmpty {
+                        listaArquivos
                     }
-                }
-                .frame(maxHeight: 200)
-            }
 
-            // Seção Saída
-            GroupBox("Saída") {
-                HStack {
-                    Text(pastaDestino?.lastPathComponent ?? "Selecionar pasta…")
-                        .foregroundColor(pastaDestino == nil ? .secondary : .primary)
-                    Spacer()
-                    Button("Escolher…") {
-                        selecionarPastaDestino()
-                    }
-                }
-            }
+                    // Saída / Vault (campo unificado)
+                    campoCaminho
 
-            // Seção Obsidian
-            GroupBox("Obsidian") {
-                VStack(alignment: .leading, spacing: 10) {
-                    Toggle("Modo Obsidian", isOn: $modoObsidian)
-
-                    if modoObsidian {
-                        HStack {
-                            Text(vaultPath?.lastPathComponent ?? "Selecionar vault…")
-                                .foregroundColor(vaultPath == nil ? .secondary : .primary)
-                            Spacer()
-                            Button("Escolher…") {
-                                selecionarVault()
+                    // Toggle Obsidian
+                    GroupBox {
+                        Toggle("Modo Obsidian", isOn: $modoObsidian)
+                            .onChange(of: modoObsidian) { _ in
+                                caminho = nil  // limpa ao trocar modo
                             }
-                        }
+                    }
+
+                    // Botões de ação
+                    botoesAcao
+
+                    // Progresso
+                    if processador.estaProcessando {
+                        barraProgresso
+                    }
+
+                    Spacer(minLength: 16)
+                }
+                .padding(.horizontal, 16)
+            }
+        }
+        .frame(minWidth: 480, minHeight: 420)
+    }
+
+    // MARK: — Subviews
+
+    private var cabecalho: some View {
+        HStack(spacing: 10) {
+            Image("AppIcon")
+                .resizable()
+                .frame(width: 32, height: 32)
+                .clipShape(RoundedRectangle(cornerRadius: 7))
+            Text("pdf2md")
+                .font(.headline)
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.bar)
+    }
+
+    private var zonaArrastar: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(
+                    isDragOver ? Color.accentColor : Color.secondary.opacity(0.4),
+                    style: StrokeStyle(lineWidth: 2, dash: [6])
+                )
+                .background(
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(isDragOver ? Color.accentColor.opacity(0.08) : Color.clear)
+                )
+                .frame(height: 110)
+
+            VStack(spacing: 6) {
+                Image(systemName: "doc.badge.arrow.up")
+                    .font(.system(size: 32))
+                    .foregroundColor(isDragOver ? .accentColor : .secondary)
+                Text("Arraste PDFs e imagens aqui")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                Text("PDF · PNG · JPG · TIFF · WEBP · BMP · HEIC")
+                    .font(.caption2)
+                    .foregroundColor(.secondary.opacity(0.6))
+            }
+        }
+        .onDrop(of: [UTType.fileURL.identifier], isTargeted: $isDragOver) { providers in
+            handleDrop(providers: providers)
+            return true
+        }
+    }
+
+    private var listaArquivos: some View {
+        GroupBox {
+            List(arquivosSelecionados, id: \.self) { url in
+                HStack {
+                    statusIcon(for: url)
+                    Text(url.lastPathComponent)
+                        .lineLimit(1)
+                        .font(.system(.body, design: .monospaced))
+                    Spacer()
+                    if let prog = processador.progresso.first(where: { $0.id == url.path }),
+                       let err = prog.erro {
+                        Text(err)
+                            .font(.caption)
+                            .foregroundColor(.red)
+                            .lineLimit(1)
                     }
                 }
             }
+            .listStyle(.plain)
+            .frame(height: min(CGFloat(arquivosSelecionados.count) * 32, 160))
+        }
+    }
 
-            // Botão Converter
+    private var campoCaminho: some View {
+        GroupBox(labelCaminho) {
+            HStack {
+                Label(
+                    caminho?.lastPathComponent ?? placeholderCaminho,
+                    systemImage: modoObsidian ? "diamond" : "folder"
+                )
+                .foregroundColor(caminho == nil ? .secondary : .primary)
+                .lineLimit(1)
+                Spacer()
+                Button("Escolher…") {
+                    selecionarCaminho()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+        }
+    }
+
+    private var botoesAcao: some View {
+        HStack(spacing: 12) {
+            if processador.estaProcessando {
+                // Botão Cancelar — visível apenas durante conversão
+                Button(role: .destructive) {
+                    cancelarConversao()
+                } label: {
+                    Label("Cancelar", systemImage: "xmark.circle")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+                .keyboardShortcut(.escape, modifiers: [])
+            }
+
             Button("Converter") {
                 iniciarConversao()
             }
-            .disabled(arquivosSelecionados.isEmpty || (pastaDestino == nil && vaultPath == nil))
+            .disabled(
+                arquivosSelecionados.isEmpty ||
+                caminho == nil ||
+                processador.estaProcessando
+            )
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
-
-            // Progresso — barra linear com contagem
-            if processador.estaProcessando {
-                let total = processador.progresso.count
-                let concluidos = processador.progresso.filter {
-                    $0.status == "concluido" || $0.status == "erro"
-                }.count
-                VStack(spacing: 4) {
-                    ProgressView(value: Double(concluidos), total: Double(max(total, 1)))
-                        .progressViewStyle(.linear)
-                    Text("\(concluidos) / \(total)")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-            }
 
             if processador.concluido {
                 Button("Limpar") {
                     limpar()
                 }
                 .buttonStyle(.bordered)
+                .controlSize(.large)
             }
-
-            Spacer()
         }
-        .padding()
-        .frame(minWidth: 500, minHeight: 400)
     }
+
+    private var barraProgresso: some View {
+        let total = processador.progresso.count
+        let concluidos = processador.progresso.filter {
+            $0.status == "concluido" || $0.status == "erro" || $0.status == "cancelado"
+        }.count
+        return VStack(spacing: 4) {
+            ProgressView(value: Double(concluidos), total: Double(max(total, 1)))
+                .progressViewStyle(.linear)
+            Text("\(concluidos) / \(total)")
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+    }
+
+    // MARK: — Helpers
 
     private func statusIcon(for url: URL) -> some View {
         let progresso = processador.progresso.first { $0.id == url.path }
         switch progresso?.status {
         case "concluido":
-            return Image(systemName: "checkmark.circle.fill")
-                .foregroundColor(.green)
+            return Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
         case "erro":
-            return Image(systemName: "xmark.circle.fill")
-                .foregroundColor(.red)
+            return Image(systemName: "xmark.circle.fill").foregroundColor(.red)
+        case "cancelado":
+            return Image(systemName: "minus.circle.fill").foregroundColor(.orange)
         case "processando":
-            return Image(systemName: "arrow.2.circlepath")
-                .foregroundColor(.blue)
+            return Image(systemName: "arrow.2.circlepath").foregroundColor(.accentColor)
         default:
-            return Image(systemName: "clock")
-                .foregroundColor(.gray)
+            return Image(systemName: "clock").foregroundColor(.secondary)
         }
     }
 
@@ -146,43 +240,39 @@ struct ContentView: View {
         }
     }
 
-    private func selecionarPastaDestino() {
+    private func selecionarCaminho() {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
+        panel.message = mensagemPicker
         if panel.runModal() == .OK {
-            pastaDestino = panel.url?.resolvingSymlinksInPath()
-        }
-    }
-
-    private func selecionarVault() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.message = "Selecione a raiz do vault Obsidian"
-        if panel.runModal() == .OK {
-            vaultPath = panel.url?.resolvingSymlinksInPath()
+            caminho = panel.url?.resolvingSymlinksInPath()
         }
     }
 
     private func iniciarConversao() {
-        Task {
+        guard let destino = caminho else { return }
+        tarefaConversao = Task {
             await processador.iniciarConversao(
                 arquivos: arquivosSelecionados,
-                destino: pastaDestino,
-                vault: vaultPath,
+                destino: modoObsidian ? nil : destino,
+                vault: modoObsidian ? destino : nil,
                 obsidian: modoObsidian
             )
         }
     }
 
+    private func cancelarConversao() {
+        tarefaConversao?.cancel()
+        processador.cancelar()
+    }
+
     private func limpar() {
         arquivosSelecionados.removeAll()
-        pastaDestino = nil
-        vaultPath = nil
+        caminho = nil
         modoObsidian = false
         processador.limpar()
+        tarefaConversao = nil
     }
 }

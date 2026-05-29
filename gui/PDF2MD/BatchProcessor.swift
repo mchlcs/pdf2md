@@ -7,7 +7,7 @@ import UserNotifications
 
 struct ProgressoArquivo: Identifiable, Codable {
     let id: String      // path do arquivo origem
-    let status: String  // "aguardando" | "processando" | "concluido" | "erro"
+    let status: String  // "aguardando" | "processando" | "concluido" | "erro" | "cancelado"
     let erro: String?
 }
 
@@ -16,6 +16,9 @@ class BatchProcessor: ObservableObject {
     @Published var progresso: [ProgressoArquivo] = []
     @Published var estaProcessando: Bool = false
     @Published var concluido: Bool = false
+
+    // Processo ativo — referência para cancelamento imediato
+    private var processoAtivo: Process?
 
     // Localiza binário Python embarcado no bundle
     private var caminhoBinario: URL? {
@@ -36,12 +39,11 @@ class BatchProcessor: ObservableObject {
         estaProcessando = true
         concluido = false
 
-        // Sanitização: filtrar URLs fora do diretório home ANTES de processar (Fix C1)
+        // Sanitização: filtrar URLs fora do diretório home ANTES de processar
         let home = FileManager.default.homeDirectoryForCurrentUser
         let arquivosValidos: [URL] = arquivos.compactMap { url in
             let seguro = url.resolvingSymlinksInPath()
             guard seguro.path.hasPrefix(home.path) else {
-                // Marca como erro imediatamente — não processa
                 let rejeitado = ProgressoArquivo(
                     id: url.path,
                     status: "erro",
@@ -59,11 +61,17 @@ class BatchProcessor: ObservableObject {
         }
         progresso.append(contentsOf: progressoInicial)
 
-        // Processa cada arquivo válido (Fix H1: async correto, sem bloquear MainActor)
+        // Processa cada arquivo válido com suporte a cancelamento
         for url in arquivosValidos {
+            // Verifica cancelamento antes de cada arquivo
+            if Task.isCancelled {
+                atualizarProgresso(id: url.path, status: "cancelado", erro: nil)
+                continue
+            }
+
             atualizarProgresso(id: url.path, status: "processando", erro: nil)
 
-            // Monta args: ORIGEM [DESTINO] [--vault PATH] [--obsidian] --json (Fix H2)
+            // Monta args: ORIGEM [DESTINO] [--vault PATH] [--obsidian] --json
             var args: [String] = [url.path]
 
             if let v = vault {
@@ -79,7 +87,7 @@ class BatchProcessor: ObservableObject {
                 args.append("--obsidian")
             }
 
-            // --json ao final (posição correta para Typer) (Fix H2)
+            // --json ao final (posição correta para Typer)
             args.append("--json")
 
             let processo = Process()
@@ -91,15 +99,28 @@ class BatchProcessor: ObservableObject {
             processo.standardOutput = stdoutPipe
             processo.standardError = stderrPipe
 
+            // Guarda referência para cancelamento imediato
+            processoAtivo = processo
+
             do {
                 try processo.run()
 
-                // Fix H1: não bloqueia MainActor — aguarda em task separado
-                await withCheckedContinuation { continuation in
-                    Task.detached {
-                        processo.waitUntilExit()
-                        continuation.resume()
+                // Aguarda sem bloquear MainActor
+                await withTaskCancellationHandler {
+                    await withCheckedContinuation { continuation in
+                        Task.detached {
+                            processo.waitUntilExit()
+                            continuation.resume()
+                        }
                     }
+                } onCancel: {
+                    processo.terminate()
+                }
+
+                // Se foi cancelado durante a espera
+                if Task.isCancelled {
+                    atualizarProgresso(id: url.path, status: "cancelado", erro: nil)
+                    continue
                 }
 
                 if let data = try? stdoutPipe.fileHandleForReading.readDataToEndOfFile(),
@@ -116,9 +137,21 @@ class BatchProcessor: ObservableObject {
             }
         }
 
+        processoAtivo = nil
         estaProcessando = false
-        concluido = true
-        emitirNotificacao()
+        concluido = !Task.isCancelled
+
+        if concluido {
+            emitirNotificacao()
+        }
+    }
+
+    /// Cancela conversão em curso — termina processo ativo imediatamente.
+    func cancelar() {
+        processoAtivo?.terminate()
+        processoAtivo = nil
+        estaProcessando = false
+        concluido = false
     }
 
     private func atualizarProgresso(id: String, status: String, erro: String?) {
@@ -135,7 +168,12 @@ class BatchProcessor: ObservableObject {
         content.title = "pdf2md"
         let sucessos = progresso.filter { $0.status == "concluido" }.count
         let erros = progresso.filter { $0.status == "erro" }.count
-        content.body = "Concluído: \(sucessos) sucessos, \(erros) erros"
+        let cancelados = progresso.filter { $0.status == "cancelado" }.count
+        var partes: [String] = []
+        if sucessos > 0 { partes.append("\(sucessos) concluídos") }
+        if erros > 0 { partes.append("\(erros) erros") }
+        if cancelados > 0 { partes.append("\(cancelados) cancelados") }
+        content.body = partes.joined(separator: " · ")
         content.sound = .default
 
         let request = UNNotificationRequest(
@@ -150,5 +188,6 @@ class BatchProcessor: ObservableObject {
         progresso.removeAll()
         estaProcessando = false
         concluido = false
+        processoAtivo = nil
     }
 }
