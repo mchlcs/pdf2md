@@ -8,7 +8,7 @@ import tempfile
 import fitz  # PyMuPDF
 import pymupdf4llm
 
-from core.image_converter import image_to_md
+from core.image_converter import image_to_md, _configurar_tesseract_cmd
 from core.utils import validar_extensao
 
 
@@ -32,6 +32,10 @@ def pdf_to_md(path: Path) -> str:
         ValueError: Se path não é arquivo PDF válido.
         RuntimeError: Se pymupdf falha ao abrir o arquivo.
     """
+    # Garante que tesseract_cmd está configurado antes de qualquer OCR
+    # (necessário em binários PyInstaller onde PATH não inclui /opt/homebrew/bin/)
+    _configurar_tesseract_cmd()
+
     if not path.exists():
         raise FileNotFoundError(f"Arquivo não encontrado: {path.name}")
 

@@ -15,15 +15,45 @@ EXTENSOES_IMAGEM: frozenset[str] = frozenset({
     ".png", ".jpg", ".jpeg", ".tiff", ".tif", ".webp", ".bmp", ".heic"
 })
 
+# Paths comuns do Tesseract no macOS — necessário em apps PyInstaller,
+# onde o PATH do processo não inclui /opt/homebrew/bin/
+_TESSERACT_PATHS_MACOS = [
+    "/opt/homebrew/bin/tesseract",   # Homebrew Apple Silicon (M1/M2/M3)
+    "/usr/local/bin/tesseract",      # Homebrew Intel
+    "/usr/bin/tesseract",            # instalação manual
+]
+
+
+def _configurar_tesseract_cmd() -> None:
+    """
+    Configura pytesseract.tesseract_cmd para o path correto no macOS.
+    Necessário em binários PyInstaller onde PATH é mínimo (sem /opt/homebrew/bin/).
+    Chamado uma vez no início — sem efeito se tesseract já está no PATH.
+    """
+    import shutil
+    import pytesseract
+
+    # Já acessível no PATH atual — não precisa configurar
+    if shutil.which("tesseract"):
+        return
+
+    # Procura nos paths conhecidos do Homebrew
+    for caminho in _TESSERACT_PATHS_MACOS:
+        if Path(caminho).exists():
+            pytesseract.pytesseract.tesseract_cmd = caminho
+            return
+
 
 def verificar_tesseract() -> bool:
     """
-    Verifica se Tesseract está instalado e acessível no PATH.
+    Verifica se Tesseract está instalado e acessível.
+    Configura o path automaticamente para binários PyInstaller no macOS.
     Retorna True se disponível, False caso contrário.
     Não lança exceção.
     """
     try:
         import pytesseract
+        _configurar_tesseract_cmd()
         pytesseract.get_tesseract_version()
         return True
     except Exception:
