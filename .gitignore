@@ -1,0 +1,46 @@
+# Python
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+dist/
+build/
+*.spec
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+*.app
+*.dmg
+
+# Segredos — nunca commitar
+.env
+*.env
+.env.*
+secrets.*
+*.key
+*.pem
+*.p12
+*.cert
+
+# IDE
+.idea/
+.vscode/
+*.xcuserdata/
+xcuserdata/
+*.xcworkspace/data
+DerivedData/
+
+# Testes
+.pytest_cache/
+.coverage
+htmlcov/
+*.xml
+
+# uv
+.python-version

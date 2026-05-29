@@ -1,0 +1,65 @@
+[project]
+name = "pdf2md"
+version = "0.1.0-alpha"
+description = "Converte PDFs e imagens em Markdown com suporte a batch e Obsidian vault"
+readme = "README.md"
+requires-python = ">=3.12"
+license = {text = "MIT"}
+authors = [
+    {name = "mchlcs"}
+]
+keywords = ["pdf", "markdown", "ocr", "obsidian", "tesseract"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: MacOS",
+]
+
+dependencies = [
+    "pymupdf4llm>=0.0.17",
+    "PyMuPDF>=1.24.0",
+    "pytesseract>=0.3.10",
+    "Pillow>=10.0.0",
+    "pillow-heif>=0.16.0",
+    "PyYAML>=6.0",
+    "typer>=0.12.0",
+    "rich>=13.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=5.0.0",
+    "ruff>=0.4.0",
+    "pip-audit>=2.7.0",
+    "detect-secrets>=1.5.0",
+    "mypy>=1.10.0",
+]
+
+[project.scripts]
+pdf2md = "core.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "B", "C4", "SIM"]
+ignore = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
