@@ -22,7 +22,9 @@ jobs:
         run: brew install tesseract tesseract-lang antiword
 
       - name: Instalar dependências Python
-        run: pip install -e ".[dev]"
+        run: |
+          pip install --upgrade pip
+          pip install ".[dev]"
 
       - name: Lint (ruff)
         run: ruff check core/ tests/
