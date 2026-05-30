@@ -49,6 +49,9 @@ struct ContentView: View {
                             .onChange(of: modoObsidian) { _ in
                                 caminho = nil  // limpa ao trocar modo
                             }
+                            // Travado durante conversão: trocar o modo zeraria o
+                            // caminho enquanto o job já roda com o path antigo.
+                            .disabled(processador.estaProcessando)
                     }
 
                     // Botões de ação

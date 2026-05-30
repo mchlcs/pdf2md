@@ -49,7 +49,9 @@ class BatchProcessor: ObservableObject {
         let home = FileManager.default.homeDirectoryForCurrentUser
         let arquivosValidos: [URL] = arquivos.compactMap { url in
             let seguro = url.resolvingSymlinksInPath()
-            guard seguro.path.hasPrefix(home.path) else {
+            // Confinamento com fronteira de componente: home.path sem "/" final
+            // deixaria /Users/bob prefixar /Users/bobby. Exige igualdade ou "/".
+            guard seguro.path == home.path || seguro.path.hasPrefix(home.path + "/") else {
                 let rejeitado = ProgressoArquivo(
                     id: url.path,
                     status: "erro",

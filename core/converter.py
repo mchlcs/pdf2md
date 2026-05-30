@@ -46,6 +46,14 @@ def pdf_to_md(path: Path) -> str:
     except Exception as exc:
         raise RuntimeError("Falha ao abrir PDF — arquivo corrompido ou formato inválido") from exc
 
+    # Uma única passada do pymupdf4llm (page_chunks) para todas as páginas.
+    # Antes: to_markdown(str(path), pages=[n]) dentro do loop reabria e
+    # reparseava o PDF inteiro por página — O(n) parses do documento.
+    try:
+        chunks = pymupdf4llm.to_markdown(str(path), page_chunks=True)
+    except Exception:
+        chunks = []
+
     partes: list[str] = []
 
     try:
@@ -56,11 +64,12 @@ def pdf_to_md(path: Path) -> str:
             texto_pagina = pagina.get_text()
 
             if len(texto_pagina.strip()) >= 50:
-                # Página com texto suficiente — tenta pymupdf4llm (melhor formatação MD)
-                md_pagina = pymupdf4llm.to_markdown(str(path), pages=[num_pagina])
-                if not md_pagina.strip():
-                    # pymupdf4llm retornou vazio (ex: layout multi-coluna complexo)
-                    # fallback: texto nativo do fitz, preserva conteúdo sem formatação MD
+                # Texto nativo suficiente — usa o MD do chunk correspondente
+                # (melhor formatação); fallback para texto bruto do fitz se vazio.
+                md_pagina = ""
+                if num_pagina < len(chunks):
+                    md_pagina = (chunks[num_pagina].get("text") or "").strip()
+                if not md_pagina:
                     md_pagina = texto_pagina.strip()
                 partes.append(md_pagina)
             else:

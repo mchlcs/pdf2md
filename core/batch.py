@@ -1,6 +1,6 @@
 """
-Orquestra conversão em batch de múltiplos arquivos (PDFs e imagens).
-Paraleliza via ProcessPoolExecutor.
+Orquestra conversão em batch de múltiplos arquivos (PDFs, imagens e Word).
+Paraleliza via ThreadPoolExecutor (compatível com PyInstaller one-file).
 """
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -66,8 +66,8 @@ def _processar_arquivo(
     sobrescrever: bool,
 ) -> dict:
     """
-    Worker para ProcessPoolExecutor. Recebe strings para ser serializável.
-    Retorna dict com os campos de ResultadoArquivo.
+    Worker executado em ThreadPoolExecutor. Recebe/retorna tipos simples
+    (strings, dict) para uma fronteira de dados limpa entre as threads.
     """
     origem = Path(origem_str)
     destino = Path(destino_str)
@@ -142,7 +142,7 @@ def batch_convert(
     - `sobrescrever=False`: pula arquivos já existentes no destino
     - `vault` definido: output vai para `vault/_inbox/` (cria se não existir)
     - `obsidian=True` (ou vault definido): aplica frontmatter antes de salvar
-    - Paraleliza via `concurrent.futures.ProcessPoolExecutor(max_workers=workers)`
+    - Paraleliza via `concurrent.futures.ThreadPoolExecutor(max_workers=workers)`
     - Erros individuais não interrompem o batch — capturados em ResultadoArquivo.erro
 
     Args:

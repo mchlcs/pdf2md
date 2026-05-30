@@ -114,18 +114,23 @@ def test_batch_docx(tmp_path):
 
 
 def test_batch_doc_extensao_reconhecida(tmp_path):
-    """batch_convert tenta processar .doc (não ignora a extensão)."""
+    """batch_convert converte .doc que é na verdade um .docx (zip "PK").
+
+    Determinístico: o sniff de assinatura roteia "PK" para mammoth, sem
+    depender de antiword. Antes o teste só asseria `!= IGNORADO`, passando
+    também em ERRO — não validava conversão real.
+    """
     from core.batch import StatusArquivo, batch_convert
     path = tmp_path / "entrada" / "doc.doc"
     path.parent.mkdir()
-    # Cria um "doc" que na verdade é docx (Word 2003 XML seria muito complexo)
-    # — testa que batch não retorna IGNORADO para .doc
-    _criar_docx_simples(path)
+    _criar_docx_simples(path, "Documento Word salvo como .doc")
     resultados = batch_convert(
         origem=path,
         destino=tmp_path / "saida",
         workers=1,
     )
     assert len(resultados) == 1
-    # CONCLUIDO ou ERRO — nunca IGNORADO
-    assert resultados[0].status != StatusArquivo.IGNORADO
+    assert resultados[0].status == StatusArquivo.CONCLUIDO
+    assert resultados[0].destino is not None
+    assert resultados[0].destino.exists()
+    assert resultados[0].destino.read_text(encoding="utf-8").strip() != ""

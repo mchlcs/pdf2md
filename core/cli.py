@@ -14,7 +14,7 @@ from rich.console import Console
 from rich.progress import BarColumn, MofNCompleteColumn, Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
-from core.utils import validar_path_seguro
+from core.utils import EXTENSOES_IMAGEM, EXTENSOES_PDF, validar_path_seguro
 
 app = typer.Typer(
     name="pdf2md",
@@ -29,6 +29,20 @@ def _emitir_json(id_: str, status: str, erro: str | None) -> None:
     linha = json.dumps({"id": id_, "status": status, "erro": erro}, ensure_ascii=False)
     sys.stdout.write(linha + "\n")
     sys.stdout.flush()
+
+
+def _requer_ocr(origem: Path) -> bool:
+    """
+    True se a entrada pode exigir OCR (imagens ou PDFs).
+    Documentos Word (.doc/.docx) usam mammoth/antiword e dispensam Tesseract,
+    então uma conversão só de Word não deve ser bloqueada por Tesseract ausente.
+    """
+    ocr_exts = EXTENSOES_IMAGEM | EXTENSOES_PDF
+    if origem.is_file():
+        return origem.suffix.lower() in ocr_exts
+    if origem.is_dir():
+        return any(p.suffix.lower() in ocr_exts for p in origem.iterdir())
+    return False
 
 
 @app.command()
@@ -61,8 +75,9 @@ def converter(
         console.print(f"[red]Erro de validação: {exc}[/red]")
         raise typer.Exit(code=1) from exc
 
-    # Verifica Tesseract
-    if not verificar_tesseract():
+    # Verifica Tesseract apenas se a entrada puder exigir OCR.
+    # (.docx/.doc usam mammoth/antiword e não dependem de Tesseract.)
+    if _requer_ocr(origem) and not verificar_tesseract():
         msg = (
             "[red]Tesseract não encontrado. "
             "Instale: brew install tesseract tesseract-lang[/red]"
