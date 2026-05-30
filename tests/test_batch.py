@@ -174,3 +174,42 @@ def test_batch_path_traversal(tmp_path):
             destino=tmp_path / "saida",
             workers=1,
         )
+
+
+def test_batch_colisao_stem_nao_perde_dados(tmp_path):
+    """report.pdf + report.docx → 2 MDs distintos, sem sobrescrita (data race).
+
+    Regressão: antes ambos geravam report.md → write_text concorrente sob
+    ThreadPoolExecutor causava perda silenciosa de um dos arquivos.
+    """
+    from docx import Document
+
+    entrada = tmp_path / "entrada"
+    entrada.mkdir()
+
+    # PDF com texto nativo (>50 chars ASCII → caminho pymupdf4llm, sem OCR)
+    doc = fitz.open()
+    p = doc.new_page(width=595, height=842)
+    p.insert_text((50, 50), "Conteudo do PDF de relatorio para validacao do batch converter.")
+    doc.save(str(entrada / "report.pdf"))
+    doc.close()
+
+    # DOCX com o MESMO stem
+    docx = Document()
+    docx.add_paragraph("Conteudo do DOCX de relatorio para validacao.")
+    docx.save(str(entrada / "report.docx"))
+
+    resultados = batch_convert(
+        origem=entrada,
+        destino=tmp_path / "saida",
+        workers=2,
+    )
+
+    concluidos = [r for r in resultados if r.status == StatusArquivo.CONCLUIDO]
+    assert len(concluidos) == 2
+    # Destinos precisam ser distintos — sem colisão de nome
+    destinos = {r.destino for r in concluidos}
+    assert len(destinos) == 2
+    for d in destinos:
+        assert d is not None and d.exists()
+        assert d.read_text(encoding="utf-8").strip() != ""

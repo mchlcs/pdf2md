@@ -28,14 +28,17 @@ def validar_path_seguro(path: Path, base_permitida: Path | None = None) -> Path:
         ValueError: Se path contém '..' ou está fora de base_permitida.
     """
     path_resolvido = path.resolve()
-    if ".." in str(path):
-        raise ValueError(f"Path contém traversal inválido: {path}")
+    # Detecta traversal por componente (não substring): captura segmentos '..'
+    # reais sem falso positivo em nomes como "relatorio..final.pdf".
+    if ".." in path.parts:
+        raise ValueError(f"Path contém traversal inválido: {path.name}")
     if base_permitida:
         base_resolvida = base_permitida.resolve()
         try:
             path_resolvido.relative_to(base_resolvida)
         except ValueError as exc:
-            raise ValueError(f"Path fora do diretório permitido: {path}") from exc
+            # Não vaza o path absoluto do usuário na mensagem de erro
+            raise ValueError(f"Path fora do diretório permitido: {path.name}") from exc
     return path_resolvido
 
 

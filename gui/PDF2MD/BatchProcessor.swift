@@ -36,14 +36,22 @@ class BatchProcessor: ObservableObject {
             return
         }
 
+        // Evita reentrância: ignora novo início enquanto uma conversão corre.
+        // Sem isto, cancelar+reconverter cria duas execuções que se atropelam
+        // no MainActor (zerando estaProcessando/processoAtivo da nova).
+        guard !estaProcessando else { return }
+
         estaProcessando = true
         concluido = false
+        progresso.removeAll()  // cada execução exibe apenas seus próprios arquivos
 
         // Sanitização: filtrar URLs fora do diretório home ANTES de processar
         let home = FileManager.default.homeDirectoryForCurrentUser
         let arquivosValidos: [URL] = arquivos.compactMap { url in
             let seguro = url.resolvingSymlinksInPath()
-            guard seguro.path.hasPrefix(home.path) else {
+            // Confinamento com fronteira de componente: home.path sem "/" final
+            // deixaria /Users/bob prefixar /Users/bobby. Exige igualdade ou "/".
+            guard seguro.path == home.path || seguro.path.hasPrefix(home.path + "/") else {
                 let rejeitado = ProgressoArquivo(
                     id: url.path,
                     status: "erro",
@@ -105,16 +113,25 @@ class BatchProcessor: ObservableObject {
             do {
                 try processo.run()
 
-                // Aguarda sem bloquear MainActor
-                await withTaskCancellationHandler {
-                    await withCheckedContinuation { continuation in
+                // Drena stdout E stderr concorrentemente enquanto aguarda o
+                // término. Ler só após waitUntilExit() causaria deadlock: se o
+                // processo-filho enche um pipe não-drenado (~64KB), bloqueia em
+                // write() e nunca sai. Os dois pipes são lidos em tasks separadas.
+                let stdoutData: Data = await withTaskCancellationHandler {
+                    await withCheckedContinuation { (continuation: CheckedContinuation<Data, Never>) in
                         Task.detached {
+                            _ = try? stderrPipe.fileHandleForReading.readToEnd()
+                        }
+                        Task.detached {
+                            let dados = (try? stdoutPipe.fileHandleForReading.readToEnd()) ?? Data()
                             processo.waitUntilExit()
-                            continuation.resume()
+                            continuation.resume(returning: dados)
                         }
                     }
                 } onCancel: {
-                    processo.terminate()
+                    if processo.isRunning {
+                        processo.terminate()
+                    }
                 }
 
                 // Se foi cancelado durante a espera
@@ -123,8 +140,7 @@ class BatchProcessor: ObservableObject {
                     continue
                 }
 
-                if let data = try? stdoutPipe.fileHandleForReading.readDataToEndOfFile(),
-                   let string = String(data: data, encoding: .utf8) {
+                if let string = String(data: stdoutData, encoding: .utf8) {
                     for linha in string.split(separator: "\n") {
                         if let jsonData = String(linha).data(using: .utf8),
                            let item = try? JSONDecoder().decode(ProgressoArquivo.self, from: jsonData) {
@@ -139,19 +155,22 @@ class BatchProcessor: ObservableObject {
 
         processoAtivo = nil
         estaProcessando = false
-        concluido = !Task.isCancelled
+        concluido = true  // conversão terminou (concluída ou cancelada) → habilita "Limpar"
 
-        if concluido {
+        // Notifica só em término natural; cancelamento manual não dispara alerta.
+        if !Task.isCancelled {
             emitirNotificacao()
         }
     }
 
-    /// Cancela conversão em curso — termina processo ativo imediatamente.
+    /// Cancela conversão em curso — termina o processo ativo para interromper
+    /// o `await` imediatamente. O estado de UI (estaProcessando/concluido) é
+    /// liquidado pelo loop em iniciarConversao, mantendo um único dono do estado
+    /// e evitando a corrida de teardown ao reconverter.
     func cancelar() {
-        processoAtivo?.terminate()
-        processoAtivo = nil
-        estaProcessando = false
-        concluido = false
+        if processoAtivo?.isRunning == true {
+            processoAtivo?.terminate()
+        }
     }
 
     private func atualizarProgresso(id: String, status: String, erro: String?) {

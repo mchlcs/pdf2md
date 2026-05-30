@@ -3,6 +3,7 @@ Converte arquivos de imagem em Markdown via OCR (Tesseract).
 Suporta: PNG, JPG, JPEG, TIFF, WEBP, BMP, HEIC.
 Pipeline: carrega imagem → pré-processa → OCR → retorna texto como MD.
 """
+from functools import lru_cache
 from pathlib import Path
 
 from PIL import Image
@@ -24,11 +25,13 @@ _TESSERACT_PATHS_MACOS = [
 ]
 
 
+@lru_cache(maxsize=1)
 def _configurar_tesseract_cmd() -> None:
     """
     Configura pytesseract.tesseract_cmd para o path correto no macOS.
     Necessário em binários PyInstaller onde PATH é mínimo (sem /opt/homebrew/bin/).
-    Chamado uma vez no início — sem efeito se tesseract já está no PATH.
+    Memoizado: roda só uma vez por processo (shutil.which + stats não se repetem
+    a cada página/imagem do batch).
     """
     import shutil
 
@@ -45,12 +48,14 @@ def _configurar_tesseract_cmd() -> None:
             return
 
 
+@lru_cache(maxsize=1)
 def verificar_tesseract() -> bool:
     """
     Verifica se Tesseract está instalado e acessível.
     Configura o path automaticamente para binários PyInstaller no macOS.
-    Retorna True se disponível, False caso contrário.
-    Não lança exceção.
+    Retorna True se disponível, False caso contrário. Não lança exceção.
+    Memoizado: evita um subprocess `tesseract --version` por página/imagem
+    (a disponibilidade do Tesseract não muda durante a execução).
     """
     try:
         import pytesseract

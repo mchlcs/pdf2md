@@ -8,7 +8,7 @@ Estratégia:
 import subprocess
 from pathlib import Path
 
-EXTENSOES_DOC: frozenset[str] = frozenset({".doc", ".docx"})
+from core.utils import EXTENSOES_DOC  # fonte única da verdade (re-exportado)
 
 
 def doc_to_md(path: Path) -> str:
@@ -56,26 +56,54 @@ def _docx_para_md(path: Path) -> str:
         ) from exc
 
 
+def _decodificar_antiword(dados: bytes) -> str:
+    """
+    Decodifica a saída do antiword tolerando seu encoding padrão Latin-1/CP1252.
+
+    antiword emite Latin-1 por padrão; decodificar como UTF-8 levantaria
+    UnicodeDecodeError em documentos PT-BR (ç, ã, é) — exatamente o público-alvo.
+    Tenta UTF-8, depois CP1252, e por fim Latin-1 (que nunca falha: mapeia os
+    256 bytes). Só usa 'replace' como rede de segurança final.
+    """
+    for enc in ("utf-8", "cp1252", "latin-1"):
+        try:
+            return dados.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return dados.decode("utf-8", errors="replace")
+
+
 def _doc_para_md(path: Path) -> str:
-    """Converte .doc via antiword — requer: brew install antiword."""
+    """
+    Converte .doc despachando pela assinatura do arquivo (magic bytes):
+    - "PK" (zip) → na verdade é um .docx/Word-XML renomeado → mammoth
+    - OLE binário (D0 CF 11 E0) ou outro → antiword (requer: brew install antiword)
+
+    Despachar pelo conteúdo (e não por "antiword falhou → tenta docx") evita
+    tentativas inúteis e preserva o stderr real do antiword na mensagem de erro.
+    """
+    with open(path, "rb") as f:
+        assinatura = f.read(4)
+
+    # .docx (zip) disfarçado de .doc — roteia direto pro mammoth
+    if assinatura[:2] == b"PK":
+        return _docx_para_md(path)
+
     try:
+        # capture_output sem text=True → bytes, decodificados defensivamente
+        # (antiword usa Latin-1; UTF-8 quebraria em acentos PT-BR).
         resultado = subprocess.run(
             ["antiword", str(path)],
             capture_output=True,
-            text=True,
             timeout=30,
         )
         if resultado.returncode == 0:
-            return resultado.stdout.strip()
-        # antiword retornou erro — arquivo pode estar no formato XML (Word 2003)
-        # tenta tratar como .docx
-        try:
-            return _docx_para_md(path)
-        except Exception as exc_inner:
-            raise RuntimeError(
-                f"Falha ao converter {path.name} — "
-                f"antiword: {resultado.stderr.strip()}"
-            ) from exc_inner
+            return _decodificar_antiword(resultado.stdout).strip()
+        # OLE binário mas antiword falhou — erro claro com o stderr real
+        stderr_txt = _decodificar_antiword(resultado.stderr).strip()
+        raise RuntimeError(
+            f"Falha ao converter {path.name} — antiword: {stderr_txt}"
+        )
     except FileNotFoundError as exc:
         raise RuntimeError(
             "antiword não encontrado. "
