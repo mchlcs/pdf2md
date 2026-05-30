@@ -46,3 +46,41 @@ Gate 2 formal (Forge 5E + Probe scan) não executado — complexidade
 emergencial resolvida inline. Score estimado: ≥85 (fixes aplicados elevam
 qualidade acima do threshold 75). Probe: zero segredos, zero paths hardcoded,
 subprocess via Process() com validação de paths no Swift bridge.
+
+## Ciclo 3 (Code Review + Release v0.2.0) — CONCLUÍDO ✅
+- Status: Fechado — 2026-05-29
+- Release: https://github.com/mchlcs/pdf2md/releases/tag/v0.2.0 (**Latest**)
+- v0.1.0 rebaixado a **pre-release** (bug do Tesseract + desatualizado)
+
+### Code Review (max-effort — 5 finders + verify + sweep)
+- 33 candidatos → **15 achados verificados → 15 corrigidos** (PRs #1, #3)
+- Cluster crítico: perda de dados (colisão de stem no batch), deadlock de pipe
+  na GUI (leitura após `waitUntilExit`), encoding Latin-1 do antiword (.doc
+  PT-BR), estado de cancelamento (UI sem reset / corrida ao reconverter)
+- 2ª leva: gate OCR só quando necessário, `page_chunks` (passada única),
+  `lru_cache` no OCR, traversal por `path.parts`, confinamento home por
+  componente (Swift), dedup `EXTENSOES_DOC`, docstrings, teste `.doc` reforçado,
+  dispatch `.doc` por magic bytes, toggle travado durante conversão
+- Relatório completo: vault `01-PROJECTS/pdf2md/code-review-ciclo2.md`
+
+### Empacotamento reproduzível (Bastion)
+- `scripts/build_app.sh`: PyInstaller → swiftc → bundle → codesign ad-hoc → DMG
+  - paths dinâmicos (zero hardcode), versão lida do `pyproject.toml`
+  - DMG via imagem RW de tamanho explícito + detach por **device node** (`-force`)
+    — contorna 3 armadilhas do hdiutil (`-format` exige srcfolder; auto-size
+    estoura com binário 84MB; detach por mountpoint dá "busy")
+- Bump: `0.1.0-alpha` → **0.2.0**; `CHANGELOG.md` criado
+- Binário congelado smoke-tested: PDF + DOCX (mammoth embarcado) + colisão #1
+  (2 MDs distintos, sem perda) + gate OCR #6
+- DMG: `PDF2MD-v0.2.0.dmg` (88.5MB, UDZO) — SHA256 `9034aa94…675108`
+
+### Novidades v0.2.0 (desde v0.1.0)
+- Suporte a **Word**: `.docx` (mammoth), `.doc` (antiword)
+- Botão **cancelar** + campo de caminho **unificado** + ícone do app
+- Fix do **Tesseract não-encontrado** no binário PyInstaller (o bug que
+  quebrava a v0.1.0 empacotada)
+
+### Fluxo
+- PRs #1 (cluster #1–5), #2 (gitignore), #3 (build + bump) — todos
+  squash-merged em `main`, CI verde
+- Build agora é 1 comando reproduzível: `bash scripts/build_app.sh`
