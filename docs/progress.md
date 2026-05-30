@@ -84,3 +84,35 @@ subprocess via Process() com validação de paths no Swift bridge.
 - PRs #1 (cluster #1–5), #2 (gitignore), #3 (build + bump) — todos
   squash-merged em `main`, CI verde
 - Build agora é 1 comando reproduzível: `bash scripts/build_app.sh`
+
+## Ciclo 4 (Release v0.3.0) — CONCLUÍDO ✅
+- Status: Fechado — 2026-05-29
+- Release: https://github.com/mchlcs/pdf2md/releases/tag/v0.3.0 (**Latest**)
+- Gatilho: usuário reportou erro "antiword não encontrado" ao converter `.doc`
+
+### Correções
+- **antiword não-encontrado no app empacotado** (`.doc`): PATH mínimo do binário
+  PyInstaller não inclui `/opt/homebrew/bin/` — **mesma classe do bug do
+  Tesseract** na v0.1.0. `_resolver_antiword()` resolve o caminho explícito
+  (PATH → fallback Homebrew), espelhando `_configurar_tesseract_cmd`.
+  Validado no binário **congelado** + `.doc` OLE real (textutil) + PATH sem
+  homebrew → conversão OK, acentos corretos.
+- **stdout poluído no modo `--json`**: MuPDF (via pymupdf4llm) escreve no fd 1
+  nativo ("Using Tesseract for OCR processing") — `redirect_stdout` do Python
+  não pega. `_silenciar_stdout_nativo()` redireciona fd 1→fd 2 ao redor da
+  conversão. Verificado: stdout 100% JSON puro.
+
+### Novidade v0.3.0
+- **Tempo de conversão**: duração por-arquivo + total. CLI (coluna "Tempo" +
+  `TimeElapsedColumn` + total) e GUI (lista + "Concluído em Xs" + notificação).
+  Medido no core (`ResultadoArquivo.duracao`), reportado via CLI e JSON.
+
+### Padrão registrado (lição)
+Binário PyInstaller = PATH mínimo. Todo `subprocess` de binário de sistema
+(antiword, tesseract, futuros) precisa de resolução de path explícita. Há 2
+resolvers espelhados; replicar o padrão para novas deps externas.
+
+### Fluxo
+- PR #4 (progress Ciclo 3), #5 (v0.3.0) — squash-merged em `main`, CI verde
+- DMG: `PDF2MD-v0.3.0.dmg` (84.4MB) — SHA256 `3c8177fa…a5cc64`
+- v0.2.0 mantida como release normal; v0.1.0 segue pre-release
