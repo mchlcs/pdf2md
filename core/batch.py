@@ -2,6 +2,7 @@
 Orquestra conversão em batch de múltiplos arquivos (PDFs, imagens e Word).
 Paraleliza via ThreadPoolExecutor (compatível com PyInstaller one-file).
 """
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from enum import Enum
@@ -34,6 +35,7 @@ class ResultadoArquivo:
     destino: Path | None
     status: StatusArquivo
     erro: str | None = None
+    duracao: float = 0.0  # segundos gastos na conversão deste arquivo
 
 
 def _nome_destino_unico(arq: Path, usados: set[str]) -> str:
@@ -71,14 +73,16 @@ def _processar_arquivo(
     """
     origem = Path(origem_str)
     destino = Path(destino_str)
+    inicio = time.perf_counter()
 
-    # Se não sobrescrever e destino existe, pula
+    # Se não sobrescrever e destino existe, pula (sem trabalho → duração 0)
     if not sobrescrever and destino.exists():
         return {
             "origem": origem_str,
             "destino": destino_str,
             "status": StatusArquivo.CONCLUIDO.value,
             "erro": None,
+            "duracao": 0.0,
         }
 
     try:
@@ -95,6 +99,7 @@ def _processar_arquivo(
                 "destino": None,
                 "status": StatusArquivo.IGNORADO.value,
                 "erro": None,
+                "duracao": 0.0,
             }
 
         if obsidian:
@@ -108,6 +113,7 @@ def _processar_arquivo(
             "destino": destino_str,
             "status": StatusArquivo.CONCLUIDO.value,
             "erro": None,
+            "duracao": round(time.perf_counter() - inicio, 3),
         }
     except Exception as exc:
         # Sanitiza mensagem de erro — não expõe paths absolutos
@@ -121,6 +127,7 @@ def _processar_arquivo(
             "destino": None,
             "status": StatusArquivo.ERRO.value,
             "erro": msg,
+            "duracao": round(time.perf_counter() - inicio, 3),
         }
 
 
@@ -227,6 +234,7 @@ def batch_convert(
                         destino=Path(res["destino"]) if res["destino"] else None,
                         status=StatusArquivo(res["status"]),
                         erro=res["erro"],
+                        duracao=res.get("duracao", 0.0),
                     ))
                 except Exception as exc:
                     resultados.append(ResultadoArquivo(

@@ -62,6 +62,13 @@ struct ContentView: View {
                         barraProgresso
                     }
 
+                    // Tempo total ao concluir
+                    if processador.concluido, let t = processador.duracaoTotal {
+                        Text("Concluído em \(BatchProcessor.formatarDuracao(t))")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+
                     Spacer(minLength: 16)
                 }
                 .padding(.horizontal, 16)
@@ -127,12 +134,17 @@ struct ContentView: View {
                         .lineLimit(1)
                         .font(.system(.body, design: .monospaced))
                     Spacer()
-                    if let prog = processador.progresso.first(where: { $0.id == url.path }),
-                       let err = prog.erro {
-                        Text(err)
-                            .font(.caption)
-                            .foregroundColor(.red)
-                            .lineLimit(1)
+                    if let prog = processador.progresso.first(where: { $0.id == url.path }) {
+                        if let err = prog.erro {
+                            Text(err)
+                                .font(.caption)
+                                .foregroundColor(.red)
+                                .lineLimit(1)
+                        } else if let d = prog.duracao {
+                            Text(BatchProcessor.formatarDuracao(d))
+                                .font(.caption.monospacedDigit())
+                                .foregroundColor(.secondary)
+                        }
                     }
                 }
             }
