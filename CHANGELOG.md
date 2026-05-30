@@ -3,6 +3,14 @@
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 Versionamento [SemVer](https://semver.org/lang/pt-BR/).
 
+## [0.3.1] — 2026-05-29
+
+### Corrigido
+- **Tempo por-arquivo aparecia sempre "0.0s"**: conversões de texto levam
+  milissegundos e o formatador `.1f` arredondava tudo abaixo de 0.05s para
+  "0.0s". Sub-segundo agora é exibido em ms (ex: `15ms`, `216ms`). Afeta CLI e
+  GUI. A medição sempre esteve correta — só o display truncava.
+
 ## [0.3.0] — 2026-05-29
 
 ### Adicionado

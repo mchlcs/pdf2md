@@ -140,7 +140,7 @@ struct ContentView: View {
                                 .font(.caption)
                                 .foregroundColor(.red)
                                 .lineLimit(1)
-                        } else if let d = prog.duracao {
+                        } else if let d = prog.duracao, d > 0 {
                             Text(BatchProcessor.formatarDuracao(d))
                                 .font(.caption.monospacedDigit())
                                 .foregroundColor(.secondary)

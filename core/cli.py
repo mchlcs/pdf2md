@@ -45,7 +45,13 @@ def _emitir_json(id_: str, status: str, erro: str | None, duracao: float = 0.0) 
 
 
 def _fmt_duracao(seg: float) -> str:
-    """Formata segundos legível: '1.2s' (<1min) ou '1m02s' (>=1min)."""
+    """Formata duração legível: '8ms' (<1s), '1.2s' (<1min), '1m02s' (>=1min).
+
+    Conversões de texto levam milissegundos; '.1f' arredondava tudo <0.05s
+    para '0.0s'. Sub-segundo é exibido em ms.
+    """
+    if seg < 1:
+        return f"{seg * 1000:.0f}ms"
     if seg < 60:
         return f"{seg:.1f}s"
     minutos, segundos = divmod(int(round(seg)), 60)
