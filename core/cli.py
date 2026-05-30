@@ -6,12 +6,22 @@ Uso: pdf2md INPUT OUTPUT [opções]
      pdf2md docs/ --vault ~/Obsidian/vault-michel
 """
 import json
+import os
 import sys
+import time
+from contextlib import contextmanager
 from pathlib import Path
 
 import typer
 from rich.console import Console
-from rich.progress import BarColumn, MofNCompleteColumn, Progress, SpinnerColumn, TextColumn
+from rich.progress import (
+    BarColumn,
+    MofNCompleteColumn,
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    TimeElapsedColumn,
+)
 from rich.table import Table
 
 from core.utils import EXTENSOES_IMAGEM, EXTENSOES_PDF, validar_path_seguro
@@ -24,11 +34,42 @@ app = typer.Typer(
 console = Console(stderr=True)
 
 
-def _emitir_json(id_: str, status: str, erro: str | None) -> None:
+def _emitir_json(id_: str, status: str, erro: str | None, duracao: float = 0.0) -> None:
     """Emite linha JSON no stdout para consumo pelo Swift bridge."""
-    linha = json.dumps({"id": id_, "status": status, "erro": erro}, ensure_ascii=False)
+    linha = json.dumps(
+        {"id": id_, "status": status, "erro": erro, "duracao": duracao},
+        ensure_ascii=False,
+    )
     sys.stdout.write(linha + "\n")
     sys.stdout.flush()
+
+
+def _fmt_duracao(seg: float) -> str:
+    """Formata segundos legível: '1.2s' (<1min) ou '1m02s' (>=1min)."""
+    if seg < 60:
+        return f"{seg:.1f}s"
+    minutos, segundos = divmod(int(round(seg)), 60)
+    return f"{minutos}m{segundos:02d}s"
+
+
+@contextmanager
+def _silenciar_stdout_nativo():
+    """
+    Redireciona o fd 1 (stdout) para o fd 2 (stderr) no nível do OS.
+
+    Bibliotecas C (MuPDF, via pymupdf4llm) escrevem mensagens direto no fd 1
+    — `contextlib.redirect_stdout` não as captura, pois trocam só `sys.stdout`.
+    Sem isto, o ruído ("Using Tesseract for OCR processing") contamina o
+    protocolo JSON consumido pelo bridge Swift. Usado só ao redor da conversão;
+    thread-safe na fronteira (as threads do batch são unidas antes de restaurar).
+    """
+    fd_salvo = os.dup(1)
+    try:
+        os.dup2(2, 1)
+        yield
+    finally:
+        os.dup2(fd_salvo, 1)
+        os.close(fd_salvo)
 
 
 def _requer_ocr(origem: Path) -> bool:
@@ -91,28 +132,34 @@ def converter(
     if vault is not None:
         obsidian = True
 
+    inicio = time.perf_counter()
     try:
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
             BarColumn(),
             MofNCompleteColumn(),
+            TimeElapsedColumn(),
             console=console,
             transient=True,
         ) as progress:
             task = progress.add_task("Convertendo...", total=None)
-            resultados = batch_convert(
-                origem=origem,
-                destino=destino,
-                workers=workers,
-                sobrescrever=sobrescrever,
-                vault=vault,
-                obsidian=obsidian,
-            )
+            # Silencia o ruído nativo do MuPDF no stdout durante a conversão,
+            # preservando o stdout puro para o JSON emitido depois.
+            with _silenciar_stdout_nativo():
+                resultados = batch_convert(
+                    origem=origem,
+                    destino=destino,
+                    workers=workers,
+                    sobrescrever=sobrescrever,
+                    vault=vault,
+                    obsidian=obsidian,
+                )
             progress.update(task, total=len(resultados), completed=len(resultados))
     except (FileNotFoundError, NotADirectoryError) as exc:
         console.print(f"[red]Erro: {exc}[/red]")
         raise typer.Exit(code=1) from exc
+    tempo_total = time.perf_counter() - inicio
 
     # Progresso / JSON
     if json_output:
@@ -121,6 +168,7 @@ def converter(
                 str(res.origem),
                 res.status.value,
                 res.erro,
+                res.duracao,
             )
     else:
         # Tabela de resultados
@@ -128,6 +176,7 @@ def converter(
         table.add_column("Origem", style="cyan")
         table.add_column("Status", style="green")
         table.add_column("Destino", style="magenta")
+        table.add_column("Tempo", style="blue", justify="right")
         table.add_column("Erro", style="red")
 
         for res in resultados:
@@ -143,6 +192,7 @@ def converter(
                 res.origem.name,
                 f"[{status_color}]{res.status.value}[/{status_color}]",
                 res.destino.name if res.destino else "—",
+                _fmt_duracao(res.duracao) if res.duracao > 0 else "—",
                 res.erro or "—",
             )
 
@@ -157,7 +207,8 @@ def converter(
             f"\n[bold]Total:[/bold] {total} | "
             f"[green]Sucessos:[/green] {sucessos} | "
             f"[red]Erros:[/red] {erros} | "
-            f"[yellow]Ignorados:[/yellow] {ignorados}"
+            f"[yellow]Ignorados:[/yellow] {ignorados} | "
+            f"[blue]Tempo:[/blue] {_fmt_duracao(tempo_total)}"
         )
 
 

@@ -3,6 +3,23 @@
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 Versionamento [SemVer](https://semver.org/lang/pt-BR/).
 
+## [0.3.0] — 2026-05-29
+
+### Adicionado
+- **Tempo de conversão**: duração por-arquivo e total. No CLI, coluna "Tempo" na
+  tabela + `TimeElapsedColumn` na barra + tempo total no resumo. Na GUI, tempo
+  por item na lista + "Concluído em Xs" + duração na notificação.
+
+### Corrigido
+- **antiword não encontrado** no app empacotado (`.doc`): o PATH mínimo do
+  binário PyInstaller não inclui `/opt/homebrew/bin/`, então o `subprocess` não
+  achava o antiword mesmo instalado. Resolução explícita do caminho, espelhando
+  o fix do Tesseract.
+- **stdout poluído no modo `--json`**: o MuPDF (via pymupdf4llm) escreve
+  mensagens nativas no fd 1 ("Using Tesseract for OCR processing") que
+  contaminavam o protocolo JSON do bridge Swift. Agora redirecionadas para o
+  stderr ao redor da conversão, mantendo o stdout puro.
+
 ## [0.2.0] — 2026-05-29
 
 ### Adicionado
