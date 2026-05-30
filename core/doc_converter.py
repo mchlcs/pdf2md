@@ -5,10 +5,37 @@ Estratégia:
 - .docx → mammoth.convert_to_markdown() (estrutura preservada: headers, bold, listas)
 - .doc  → antiword via subprocess (texto plano; requer: brew install antiword)
 """
+import shutil
 import subprocess
 from pathlib import Path
 
 from core.utils import EXTENSOES_DOC  # fonte única da verdade (re-exportado)
+
+# Paths conhecidos do antiword no macOS — necessário em apps PyInstaller, onde
+# o PATH do processo é mínimo e não inclui /opt/homebrew/bin/.
+_ANTIWORD_PATHS_MACOS = [
+    "/opt/homebrew/bin/antiword",   # Homebrew Apple Silicon (M1/M2/M3)
+    "/usr/local/bin/antiword",      # Homebrew Intel
+    "/usr/bin/antiword",            # instalação manual
+]
+
+
+def _resolver_antiword() -> str:
+    """
+    Retorna o caminho do executável antiword.
+
+    Em binários PyInstaller (.app) o PATH é mínimo e não inclui
+    /opt/homebrew/bin/, então `subprocess` não acha o antiword mesmo instalado
+    — mesmo problema que o Tesseract tinha. Procura no PATH e, em fallback, nos
+    paths conhecidos do Homebrew. Espelha _configurar_tesseract_cmd.
+    """
+    caminho = shutil.which("antiword")
+    if caminho:
+        return caminho
+    for p in _ANTIWORD_PATHS_MACOS:
+        if Path(p).exists():
+            return p
+    return "antiword"  # deixa o subprocess falhar → mensagem clara de instalação
 
 
 def doc_to_md(path: Path) -> str:
@@ -93,7 +120,7 @@ def _doc_para_md(path: Path) -> str:
         # capture_output sem text=True → bytes, decodificados defensivamente
         # (antiword usa Latin-1; UTF-8 quebraria em acentos PT-BR).
         resultado = subprocess.run(
-            ["antiword", str(path)],
+            [_resolver_antiword(), str(path)],
             capture_output=True,
             timeout=30,
         )

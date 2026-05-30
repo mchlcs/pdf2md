@@ -96,6 +96,31 @@ def test_decodificar_antiword_nunca_levanta():
     assert isinstance(resultado, str)
 
 
+def test_resolver_antiword_usa_which(monkeypatch):
+    """Com antiword no PATH, _resolver_antiword retorna o caminho do which."""
+    import core.doc_converter as dc
+    monkeypatch.setattr(dc.shutil, "which", lambda nome: "/fake/bin/antiword")
+    assert dc._resolver_antiword() == "/fake/bin/antiword"
+
+
+def test_resolver_antiword_fallback_homebrew(monkeypatch, tmp_path):
+    """Sem antiword no PATH (binário PyInstaller), cai nos paths do Homebrew."""
+    import core.doc_converter as dc
+    monkeypatch.setattr(dc.shutil, "which", lambda nome: None)
+    falso = tmp_path / "antiword"
+    falso.write_text("")
+    monkeypatch.setattr(dc, "_ANTIWORD_PATHS_MACOS", [str(falso)])
+    assert dc._resolver_antiword() == str(falso)
+
+
+def test_resolver_antiword_ausente(monkeypatch):
+    """Sem antiword em lugar nenhum → retorna literal 'antiword' (subprocess falha claro)."""
+    import core.doc_converter as dc
+    monkeypatch.setattr(dc.shutil, "which", lambda nome: None)
+    monkeypatch.setattr(dc, "_ANTIWORD_PATHS_MACOS", ["/nao/existe/antiword"])
+    assert dc._resolver_antiword() == "antiword"
+
+
 def test_batch_docx(tmp_path):
     """batch_convert processa .docx corretamente."""
     from core.batch import StatusArquivo, batch_convert
