@@ -91,4 +91,9 @@ python3 -m pytest tests/ -v
 
 ## Licença
 
-MIT — ver [LICENSE](LICENSE).
+Código-fonte: **MIT** — ver [LICENSE](LICENSE).
+
+O binário distribuído (`.dmg`) embarca **PyMuPDF** (AGPL-3.0) e outras
+bibliotecas de terceiros. A distribuição do binário está sujeita aos termos
+dessas licenças — ver [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md). O
+source correspondente é público (este repositório), cumprindo a AGPL.
