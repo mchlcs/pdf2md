@@ -74,6 +74,9 @@ echo "▶ [3/5] Montando PDF2MD.app"
 cp "${DIST}/pdf2md" "${APP}/Contents/Resources/pdf2md"
 cp "gui/PDF2MD/Assets.xcassets/AppIcon.appiconset/AppIcon.icns" \
    "${APP}/Contents/Resources/AppIcon.icns"
+# Avisos de licença viajam com o binário (atribuição AGPL/terceiros)
+cp LICENSE "${APP}/Contents/Resources/LICENSE"
+cp THIRD-PARTY-LICENSES.md "${APP}/Contents/Resources/THIRD-PARTY-LICENSES.md"
 
 cat > "${APP}/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
