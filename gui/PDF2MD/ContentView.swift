@@ -12,14 +12,17 @@ struct ContentView: View {
     @State private var tarefaConversao: Task<Void, Never>?
     @State private var erroColagem: String? = nil  // nil = sem alert; non-nil = mensagem exibida
 
-    // Tipos permitidos no picker — calculado uma vez (fix: eficiência + UTType.doc via UTI canônica)
+    // Tipos permitidos no picker — calculado uma vez (fix: eficiência + UTI canônicas)
     private static let tiposPermitidos: [UTType] = {
         var tipos: [UTType] = [.pdf, .png, .jpeg, .tiff, .bmp, .heic]
-        let wordUTIs = [
-            "org.openxmlformats.officedocument.wordprocessingml.document",  // docx
-            "com.microsoft.word.doc",                                        // doc
+        let utis = [
+            "org.openxmlformats.officedocument.wordprocessingml.document",       // docx
+            "com.microsoft.word.doc",                                             // doc
+            "org.openxmlformats.officedocument.presentationml.presentation",     // pptx
+            "org.openxmlformats.officedocument.spreadsheetml.sheet",             // xlsx
+            "public.comma-separated-values-text",                                 // csv
         ]
-        tipos += wordUTIs.compactMap { UTType($0) }
+        tipos += utis.compactMap { UTType($0) }
         if let webp = UTType(filenameExtension: "webp") { tipos.append(webp) }
         return tipos
     }()
@@ -170,7 +173,7 @@ struct ContentView: View {
                 Text("Arraste PDFs e imagens aqui")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
-                Text("PDF · DOCX · DOC · PNG · JPG · TIFF · WEBP · BMP · HEIC")
+                Text("PDF · DOCX · DOC · PPTX · XLSX · CSV · PNG · JPG · TIFF · WEBP · BMP · HEIC")
                     .font(.caption2)
                     .foregroundColor(.secondary.opacity(0.6))
             }

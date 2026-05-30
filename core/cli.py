@@ -2,7 +2,9 @@
 Interface de linha de comando para pdf2md.
 Uso: pdf2md INPUT OUTPUT [opções]
      pdf2md arquivo.pdf saida/
-     pdf2md pasta/pdfs/ pasta/markdowns/ --workers 8
+     pdf2md arquivo.pptx saida/
+     pdf2md planilha.xlsx saida/
+     pdf2md pasta/docs/ pasta/markdowns/ --workers 8
      pdf2md docs/ --vault ~/Obsidian/vault-michel
 """
 import json

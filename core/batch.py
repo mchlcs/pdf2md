@@ -1,5 +1,5 @@
 """
-Orquestra conversão em batch de múltiplos arquivos (PDFs, imagens e Word).
+Orquestra conversão em batch de múltiplos arquivos (PDFs, imagens, Word, PPTX, planilhas).
 Paraleliza via ThreadPoolExecutor (compatível com PyInstaller one-file).
 """
 import time
@@ -12,13 +12,17 @@ from core.converter import pdf_to_md
 from core.doc_converter import doc_to_md
 from core.formatter import add_obsidian_frontmatter
 from core.image_converter import image_to_md
+from core.pptx_converter import pptx_to_md
 from core.utils import (
     EXTENSOES_DOC,
     EXTENSOES_IMAGEM,
     EXTENSOES_PDF,
     EXTENSOES_PERMITIDAS,
+    EXTENSOES_PLANILHA,
+    EXTENSOES_PPTX,
     validar_path_seguro,
 )
+from core.xlsx_converter import planilha_to_md
 
 
 class StatusArquivo(Enum):
@@ -93,6 +97,10 @@ def _processar_arquivo(
             md = image_to_md(origem)
         elif sufixo in EXTENSOES_DOC:
             md = doc_to_md(origem)
+        elif sufixo in EXTENSOES_PPTX:
+            md = pptx_to_md(origem)
+        elif sufixo in EXTENSOES_PLANILHA:
+            md = planilha_to_md(origem)
         else:
             return {
                 "origem": origem_str,
@@ -146,6 +154,7 @@ def batch_convert(
     - Se `origem` é arquivo único: processa só ele
     - Se `origem` é diretório: varre recursivamente (não recursivo por padrão — só nível raiz)
     - Arquivos com extensão não suportada: StatusArquivo.IGNORADO (sem erro)
+    - Formatos suportados: PDF, imagens (PNG/JPG/TIFF/WEBP/BMP/HEIC), DOC, DOCX, PPTX, XLSX, CSV
     - `sobrescrever=False`: pula arquivos já existentes no destino
     - `vault` definido: output vai direto para `vault/` (cria se não existir)
     - `obsidian=True` (ou vault definido): aplica frontmatter antes de salvar
