@@ -36,6 +36,29 @@ class ResultadoArquivo:
     erro: str | None = None
 
 
+def _nome_destino_unico(arq: Path, usados: set[str]) -> str:
+    """
+    Gera nome de saída .md único dentro do batch.
+
+    O primeiro arquivo de um stem mantém `<stem>.md`. Colisões subsequentes
+    (mesmo stem, extensão diferente — ex: relatorio.pdf + relatorio.docx)
+    recebem o sufixo da extensão de origem para evitar sobrescrita silenciosa
+    sob ThreadPoolExecutor: `<stem>-<ext>.md`, depois `<stem>-<ext>-2.md`, etc.
+
+    Determinístico porque a lista de arquivos é percorrida em ordem (sorted).
+    """
+    base = arq.stem + ".md"
+    if base not in usados:
+        return base
+    ext = arq.suffix.lstrip(".").lower()
+    candidato = f"{arq.stem}-{ext}.md"
+    contador = 2
+    while candidato in usados:
+        candidato = f"{arq.stem}-{ext}-{contador}.md"
+        contador += 1
+    return candidato
+
+
 def _processar_arquivo(
     origem_str: str,
     destino_str: str,
@@ -161,6 +184,7 @@ def batch_convert(
     # Prepara tarefas
     tarefas: list[tuple[Path, Path]] = []
     resultados: list[ResultadoArquivo] = []
+    nomes_usados: set[str] = set()
 
     for arq in arquivos:
         if arq.is_dir():
@@ -174,7 +198,8 @@ def batch_convert(
             ))
             continue
 
-        nome_md = arq.stem + ".md"
+        nome_md = _nome_destino_unico(arq, nomes_usados)
+        nomes_usados.add(nome_md)
         destino_arq = destino / nome_md
         tarefas.append((arq, destino_arq))
 

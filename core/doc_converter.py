@@ -56,25 +56,43 @@ def _docx_para_md(path: Path) -> str:
         ) from exc
 
 
+def _decodificar_antiword(dados: bytes) -> str:
+    """
+    Decodifica a saída do antiword tolerando seu encoding padrão Latin-1/CP1252.
+
+    antiword emite Latin-1 por padrão; decodificar como UTF-8 levantaria
+    UnicodeDecodeError em documentos PT-BR (ç, ã, é) — exatamente o público-alvo.
+    Tenta UTF-8, depois CP1252, e por fim Latin-1 (que nunca falha: mapeia os
+    256 bytes). Só usa 'replace' como rede de segurança final.
+    """
+    for enc in ("utf-8", "cp1252", "latin-1"):
+        try:
+            return dados.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return dados.decode("utf-8", errors="replace")
+
+
 def _doc_para_md(path: Path) -> str:
     """Converte .doc via antiword — requer: brew install antiword."""
     try:
+        # capture_output sem text=True → bytes, decodificados defensivamente
+        # (antiword usa Latin-1; UTF-8 quebraria em acentos PT-BR).
         resultado = subprocess.run(
             ["antiword", str(path)],
             capture_output=True,
-            text=True,
             timeout=30,
         )
         if resultado.returncode == 0:
-            return resultado.stdout.strip()
+            return _decodificar_antiword(resultado.stdout).strip()
         # antiword retornou erro — arquivo pode estar no formato XML (Word 2003)
         # tenta tratar como .docx
         try:
             return _docx_para_md(path)
         except Exception as exc_inner:
+            stderr_txt = _decodificar_antiword(resultado.stderr).strip()
             raise RuntimeError(
-                f"Falha ao converter {path.name} — "
-                f"antiword: {resultado.stderr.strip()}"
+                f"Falha ao converter {path.name} — antiword: {stderr_txt}"
             ) from exc_inner
     except FileNotFoundError as exc:
         raise RuntimeError(

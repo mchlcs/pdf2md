@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from core.doc_converter import EXTENSOES_DOC, doc_to_md
+from core.doc_converter import EXTENSOES_DOC, _decodificar_antiword, doc_to_md
 
 
 def _criar_docx_simples(path: Path, texto: str = "Conteúdo de teste Word.") -> None:
@@ -70,6 +70,30 @@ def test_extensoes_doc_set():
     """.doc e .docx estão em EXTENSOES_DOC."""
     assert ".doc" in EXTENSOES_DOC
     assert ".docx" in EXTENSOES_DOC
+
+
+def test_decodificar_antiword_latin1():
+    """Bytes Latin-1 (antiword padrão) com acentos PT-BR → texto correto.
+
+    Regressão: com text=True o subprocess decodificava como UTF-8 e
+    levantava UnicodeDecodeError em .doc com ç/ã/é.
+    """
+    # 'ção' em Latin-1/CP1252: 0xE7=ç 0xE3=ã 0x6F=o
+    assert _decodificar_antiword(b"\xe7\xe3o") == "ção"
+    # 'relatório' em Latin-1
+    assert _decodificar_antiword(b"relat\xf3rio") == "relatório"
+
+
+def test_decodificar_antiword_utf8():
+    """Saída já em UTF-8 é decodificada corretamente (sem corromper)."""
+    assert _decodificar_antiword("olá ção".encode()) == "olá ção"
+
+
+def test_decodificar_antiword_nunca_levanta():
+    """Qualquer sequência de bytes decodifica sem exceção (Latin-1 fallback)."""
+    # 0x81/0x8D/0x90 são indefinidos em CP1252 mas válidos em Latin-1
+    resultado = _decodificar_antiword(b"\x81\x8d\x90\xff")
+    assert isinstance(resultado, str)
 
 
 def test_batch_docx(tmp_path):
