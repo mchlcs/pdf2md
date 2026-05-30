@@ -199,6 +199,12 @@ struct ContentView: View {
                                 .font(.caption)
                                 .foregroundColor(.red)
                                 .lineLimit(1)
+                        } else if let aviso = prog.avisos.first {
+                            // Primeiro aviso — mais relevante que o tempo
+                            Text("⚠ \(aviso)")
+                                .font(.caption2)
+                                .foregroundColor(.orange)
+                                .lineLimit(1)
                         } else if let d = prog.duracao, d > 0 {
                             Text(BatchProcessor.formatarDuracao(d))
                                 .font(.caption.monospacedDigit())
@@ -287,7 +293,10 @@ struct ContentView: View {
         let progresso = processador.progresso.first { $0.id == url.path }
         switch progresso?.status {
         case "concluido":
-            return Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
+            // Âmbar se há avisos de qualidade, verde se output limpo
+            let temAvisos = !(progresso?.avisos.isEmpty ?? true)
+            return Image(systemName: "checkmark.circle.fill")
+                .foregroundColor(temAvisos ? .orange : .green)
         case "ignorado":
             return Image(systemName: "equal.circle.fill").foregroundColor(.secondary)
         case "erro":

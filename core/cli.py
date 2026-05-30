@@ -36,10 +36,16 @@ app = typer.Typer(
 console = Console(stderr=True)
 
 
-def _emitir_json(id_: str, status: str, erro: str | None, duracao: float = 0.0) -> None:
+def _emitir_json(
+    id_: str,
+    status: str,
+    erro: str | None,
+    duracao: float = 0.0,
+    avisos: list[str] | None = None,
+) -> None:
     """Emite linha JSON no stdout para consumo pelo Swift bridge."""
     linha = json.dumps(
-        {"id": id_, "status": status, "erro": erro, "duracao": duracao},
+        {"id": id_, "status": status, "erro": erro, "duracao": duracao, "avisos": avisos or []},
         ensure_ascii=False,
     )
     sys.stdout.write(linha + "\n")
@@ -177,6 +183,7 @@ def converter(
                 res.status.value,
                 res.erro,
                 res.duracao,
+                res.avisos,
             )
     else:
         # Tabela de resultados
@@ -185,39 +192,62 @@ def converter(
         table.add_column("Status", style="green")
         table.add_column("Destino", style="magenta")
         table.add_column("Tempo", style="blue", justify="right")
-        table.add_column("Erro", style="red")
+        table.add_column("Erro/Aviso", style="red")
 
         for res in resultados:
-            status_color = {
-                StatusArquivo.CONCLUIDO: "green",
-                StatusArquivo.ERRO: "red",
-                StatusArquivo.IGNORADO: "yellow",
-                StatusArquivo.AGUARDANDO: "dim",
-                StatusArquivo.PROCESSANDO: "blue",
-            }.get(res.status, "white")
+            tem_avisos = bool(res.avisos)
+            if res.status == StatusArquivo.CONCLUIDO and tem_avisos:
+                status_color = "yellow"
+                status_label = "concluido⚠"  # ⚠ unicode
+            else:
+                status_color = {
+                    StatusArquivo.CONCLUIDO: "green",
+                    StatusArquivo.ERRO: "red",
+                    StatusArquivo.IGNORADO: "yellow",
+                    StatusArquivo.AGUARDANDO: "dim",
+                    StatusArquivo.PROCESSANDO: "blue",
+                }.get(res.status, "white")
+                status_label = res.status.value
+
+            nota = res.erro or (res.avisos[0] if res.avisos else "—")
 
             table.add_row(
                 res.origem.name,
-                f"[{status_color}]{res.status.value}[/{status_color}]",
+                f"[{status_color}]{status_label}[/{status_color}]",
                 res.destino.name if res.destino else "—",
                 _fmt_duracao(res.duracao) if res.duracao > 0 else "—",
-                res.erro or "—",
+                nota,
             )
 
         console.print(table)
 
         total = len(resultados)
-        sucessos = sum(1 for r in resultados if r.status == StatusArquivo.CONCLUIDO)
+        sucessos = sum(1 for r in resultados if r.status == StatusArquivo.CONCLUIDO and not r.avisos)
+        com_aviso = sum(1 for r in resultados if r.status == StatusArquivo.CONCLUIDO and r.avisos)
         erros = sum(1 for r in resultados if r.status == StatusArquivo.ERRO)
         ignorados = sum(1 for r in resultados if r.status == StatusArquivo.IGNORADO)
 
-        console.print(
-            f"\n[bold]Total:[/bold] {total} | "
-            f"[green]Sucessos:[/green] {sucessos} | "
-            f"[red]Erros:[/red] {erros} | "
-            f"[yellow]Ignorados:[/yellow] {ignorados} | "
-            f"[blue]Tempo:[/blue] {_fmt_duracao(tempo_total)}"
-        )
+        partes = [
+            f"\n[bold]Total:[/bold] {total}",
+            f"[green]OK:[/green] {sucessos}",
+        ]
+        if com_aviso:
+            partes.append(f"[yellow]Com aviso:[/yellow] {com_aviso}")
+        partes += [
+            f"[red]Erros:[/red] {erros}",
+            f"[yellow]Ignorados:[/yellow] {ignorados}",
+            f"[blue]Tempo:[/blue] {_fmt_duracao(tempo_total)}",
+        ]
+        console.print(" | ".join(partes))
+
+        # Lista avisos completos após a tabela
+        arquivos_com_aviso = [r for r in resultados if r.avisos]
+        if arquivos_com_aviso:
+            console.print("\n[yellow bold]⚠ Avisos de qualidade:[/yellow bold]")
+            for res in arquivos_com_aviso:
+                console.print(f"  [cyan]{res.origem.name}[/cyan]")
+                for aviso in res.avisos:
+                    console.print(f"    [yellow]• {aviso}[/yellow]")
 
 
 if __name__ == "__main__":

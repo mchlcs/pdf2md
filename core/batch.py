@@ -4,7 +4,7 @@ Paraleliza via ThreadPoolExecutor (compatível com PyInstaller one-file).
 """
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
@@ -13,6 +13,7 @@ from core.doc_converter import doc_to_md
 from core.formatter import add_obsidian_frontmatter
 from core.image_converter import image_to_md
 from core.pptx_converter import pptx_to_md
+from core.quality import corrigir_mojibake, limpar_artefatos, validar_qualidade
 from core.utils import (
     EXTENSOES_DOC,
     EXTENSOES_IMAGEM,
@@ -39,7 +40,8 @@ class ResultadoArquivo:
     destino: Path | None
     status: StatusArquivo
     erro: str | None = None
-    duracao: float = 0.0  # segundos gastos na conversão deste arquivo
+    duracao: float = 0.0          # segundos gastos na conversão deste arquivo
+    avisos: list[str] = field(default_factory=list)  # avisos de qualidade (não impedem CONCLUIDO)
 
 
 def _nome_destino_unico(arq: Path, usados: set[str]) -> str:
@@ -87,6 +89,7 @@ def _processar_arquivo(
             "status": StatusArquivo.IGNORADO.value,
             "erro": None,
             "duracao": 0.0,
+            "avisos": [],
         }
 
     try:
@@ -108,7 +111,15 @@ def _processar_arquivo(
                 "status": StatusArquivo.IGNORADO.value,
                 "erro": None,
                 "duracao": 0.0,
+                "avisos": [],
             }
+
+        # Pipeline de qualidade (ordem importa — ver docstring de quality.py):
+        # 1. Corrigir mojibake antes de remover soft hyphens
+        # 2. Limpar artefatos silenciosos
+        md, _ = corrigir_mojibake(md)
+        md = limpar_artefatos(md)
+        avisos = validar_qualidade(md, origem)
 
         if obsidian:
             md = add_obsidian_frontmatter(md, origem)
@@ -122,6 +133,7 @@ def _processar_arquivo(
             "status": StatusArquivo.CONCLUIDO.value,
             "erro": None,
             "duracao": round(time.perf_counter() - inicio, 3),
+            "avisos": avisos,
         }
     except Exception as exc:
         # Sanitiza mensagem de erro — não expõe paths absolutos
@@ -136,6 +148,7 @@ def _processar_arquivo(
             "status": StatusArquivo.ERRO.value,
             "erro": msg,
             "duracao": round(time.perf_counter() - inicio, 3),
+            "avisos": [],
         }
 
 
@@ -244,6 +257,7 @@ def batch_convert(
                         status=StatusArquivo(res["status"]),
                         erro=res["erro"],
                         duracao=res.get("duracao", 0.0),
+                        avisos=res.get("avisos", []),
                     ))
                 except Exception as exc:
                     resultados.append(ResultadoArquivo(
