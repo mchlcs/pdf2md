@@ -89,14 +89,14 @@ def test_batch_nao_sobrescreve(tmp_path):
         workers=1,
         sobrescrever=False,
     )
-    assert resultados[0].status == StatusArquivo.CONCLUIDO
-    # O worker pula existentes, mas batch_convert retorna CONCLUIDO
+    assert resultados[0].status == StatusArquivo.IGNORADO
+    # IGNORADO distingue "pulado por já existir" de "convertido com sucesso"
     # Verificamos que o conteúdo não foi alterado
     assert (saida / "doc.md").read_text(encoding="utf-8") == "já existe"
 
 
-def test_batch_vault_cria_inbox(tmp_path):
-    """vault definido → cria _inbox/ e salva lá."""
+def test_batch_vault_salva_direto(tmp_path):
+    """vault definido → salva diretamente em vault/ (sem subpasta _inbox)."""
     vault = tmp_path / "vault"
     vault.mkdir()
     entrada = tmp_path / "entrada"
@@ -114,7 +114,7 @@ def test_batch_vault_cria_inbox(tmp_path):
         workers=1,
     )
     assert resultados[0].status == StatusArquivo.CONCLUIDO
-    assert (vault / "_inbox" / "doc.md").exists()
+    assert (vault / "doc.md").exists()
 
 
 def test_batch_obsidian_frontmatter(tmp_path):

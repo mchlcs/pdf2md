@@ -35,7 +35,7 @@ brew install tesseract tesseract-lang
 
 Ative o toggle **Modo Obsidian** para:
 - Adicionar frontmatter YAML automático a cada MD gerado
-- Salvar direto na pasta `_inbox/` do vault (selecione a raiz do vault)
+- Salvar direto na raiz do vault (selecione a pasta raiz do vault)
 
 ```yaml
 ---
@@ -63,7 +63,7 @@ pdf2md pasta/docs/ saida/ --workers 8
 # Com frontmatter Obsidian
 pdf2md arquivo.pdf saida/ --obsidian
 
-# Direto no vault (cria _inbox/ automaticamente)
+# Direto no vault (raiz do vault)
 pdf2md pasta/docs/ --vault ~/Obsidian/meu-vault
 ```
 

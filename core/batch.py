@@ -75,12 +75,12 @@ def _processar_arquivo(
     destino = Path(destino_str)
     inicio = time.perf_counter()
 
-    # Se não sobrescrever e destino existe, pula (sem trabalho → duração 0)
+    # Se não sobrescrever e destino existe, pula — IGNORADO distingue de conversão bem-sucedida
     if not sobrescrever and destino.exists():
         return {
             "origem": origem_str,
             "destino": destino_str,
-            "status": StatusArquivo.CONCLUIDO.value,
+            "status": StatusArquivo.IGNORADO.value,
             "erro": None,
             "duracao": 0.0,
         }
@@ -147,7 +147,7 @@ def batch_convert(
     - Se `origem` é diretório: varre recursivamente (não recursivo por padrão — só nível raiz)
     - Arquivos com extensão não suportada: StatusArquivo.IGNORADO (sem erro)
     - `sobrescrever=False`: pula arquivos já existentes no destino
-    - `vault` definido: output vai para `vault/_inbox/` (cria se não existir)
+    - `vault` definido: output vai direto para `vault/` (cria se não existir)
     - `obsidian=True` (ou vault definido): aplica frontmatter antes de salvar
     - Paraleliza via `concurrent.futures.ThreadPoolExecutor(max_workers=workers)`
     - Erros individuais não interrompem o batch — capturados em ResultadoArquivo.erro
@@ -157,7 +157,7 @@ def batch_convert(
         destino: Diretório de saída (criado se não existir). Ignorado se vault definido.
         workers: Número de processos paralelos.
         sobrescrever: Se True, sobrescreve MDs existentes.
-        vault: Path para raiz do Obsidian vault. Output vai para vault/_inbox/.
+        vault: Path para raiz do Obsidian vault. Output vai direto para vault/.
         obsidian: Se True, adiciona frontmatter Obsidian ao MD gerado.
 
     Returns:
@@ -176,7 +176,7 @@ def batch_convert(
     if vault is not None:
         if not vault.is_dir():
             raise NotADirectoryError(f"Vault inválido: {vault.name} não é um diretório")
-        destino = vault / "_inbox"
+        destino = vault
         obsidian = True
 
     destino.mkdir(parents=True, exist_ok=True)

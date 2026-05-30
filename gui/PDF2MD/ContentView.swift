@@ -10,6 +10,26 @@ struct ContentView: View {
     @State private var modoObsidian: Bool = false
     @State private var isDragOver: Bool = false
     @State private var tarefaConversao: Task<Void, Never>?
+    @State private var erroColagem: String? = nil  // nil = sem alert; non-nil = mensagem exibida
+
+    // Tipos permitidos no picker — calculado uma vez (fix: eficiência + UTType.doc via UTI canônica)
+    private static let tiposPermitidos: [UTType] = {
+        var tipos: [UTType] = [.pdf, .png, .jpeg, .tiff, .bmp, .heic]
+        let wordUTIs = [
+            "org.openxmlformats.officedocument.wordprocessingml.document",  // docx
+            "com.microsoft.word.doc",                                        // doc
+        ]
+        tipos += wordUTIs.compactMap { UTType($0) }
+        if let webp = UTType(filenameExtension: "webp") { tipos.append(webp) }
+        return tipos
+    }()
+
+    // Pasta temporária para imagens coladas — compartilhada entre colarImagem e limpar
+    private var pasteDir: URL {
+        let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        return base.appendingPathComponent("pdf2md/pastes")
+    }
 
     // Label e picker mudam conforme modo
     private var labelCaminho: String {
@@ -31,9 +51,11 @@ struct ContentView: View {
 
             ScrollView {
                 VStack(spacing: 16) {
-                    // Zona drag-drop
+                    // Zona drag-drop + ações
                     zonaArrastar
                         .padding(.top, 16)
+
+                    botoesAdicionarArquivos
 
                     // Lista de arquivos
                     if !arquivosSelecionados.isEmpty {
@@ -75,6 +97,15 @@ struct ContentView: View {
             }
         }
         .frame(minWidth: 480, minHeight: 420)
+        // Alert com mensagem dinâmica — distingue clipboard vazio de erro de I/O
+        .alert(
+            "Erro ao colar imagem",
+            isPresented: Binding(get: { erroColagem != nil }, set: { if !$0 { erroColagem = nil } })
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(erroColagem ?? "")
+        }
     }
 
     // MARK: — Subviews
@@ -92,6 +123,31 @@ struct ContentView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .background(.bar)
+    }
+
+    private var botoesAdicionarArquivos: some View {
+        HStack(spacing: 8) {
+            Button {
+                adicionarArquivos()
+            } label: {
+                Label("Procurar arquivos…", systemImage: "folder.badge.plus")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(processador.estaProcessando)
+
+            Button {
+                colarImagem()
+            } label: {
+                Label("Colar imagem", systemImage: "doc.on.clipboard")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(processador.estaProcessando)
+            // Sem .keyboardShortcut("v") — evita interceptar Cmd+V de text fields futuros
+
+            Spacer()
+        }
     }
 
     private var zonaArrastar: some View {
@@ -209,13 +265,14 @@ struct ContentView: View {
 
     private var barraProgresso: some View {
         let total = processador.progresso.count
-        let concluidos = processador.progresso.filter {
-            $0.status == "concluido" || $0.status == "erro" || $0.status == "cancelado"
+        let terminados = processador.progresso.filter {
+            $0.status == "concluido" || $0.status == "erro" ||
+            $0.status == "cancelado" || $0.status == "ignorado"
         }.count
         return VStack(spacing: 4) {
-            ProgressView(value: Double(concluidos), total: Double(max(total, 1)))
+            ProgressView(value: Double(terminados), total: Double(max(total, 1)))
                 .progressViewStyle(.linear)
-            Text("\(concluidos) / \(total)")
+            Text("\(terminados) / \(total)")
                 .font(.caption)
                 .foregroundColor(.secondary)
         }
@@ -228,6 +285,8 @@ struct ContentView: View {
         switch progresso?.status {
         case "concluido":
             return Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
+        case "ignorado":
+            return Image(systemName: "equal.circle.fill").foregroundColor(.secondary)
         case "erro":
             return Image(systemName: "xmark.circle.fill").foregroundColor(.red)
         case "cancelado":
@@ -239,16 +298,76 @@ struct ContentView: View {
         }
     }
 
+    // Adiciona URL à fila se ainda não estiver presente — dedup centralizado
+    private func adicionarSeNovo(_ url: URL) {
+        let seguro = url.resolvingSymlinksInPath()
+        if !arquivosSelecionados.contains(seguro) {
+            arquivosSelecionados.append(seguro)
+        }
+    }
+
+    private func adicionarArquivos() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = true
+        panel.message = "Selecione arquivos para converter"
+        panel.allowedContentTypes = Self.tiposPermitidos
+        // Garante que o panel apareça na frente em cenários multi-janela (macOS 14+)
+        NSApp.activate(ignoringOtherApps: true)
+        if panel.runModal() == .OK {
+            panel.urls.forEach { adicionarSeNovo($0) }
+        }
+    }
+
+    private func colarImagem() {
+        erroColagem = nil  // reset garante re-disparo do alert em falhas consecutivas
+        let pasteboard = NSPasteboard.general
+        guard let items = pasteboard.readObjects(forClasses: [NSImage.self], options: nil) as? [NSImage],
+              let imagem = items.first else {
+            erroColagem = "Nenhuma imagem no clipboard."
+            return
+        }
+        guard let cachesBase = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else {
+            erroColagem = "Diretório de cache não encontrado."
+            return
+        }
+        let dir = cachesBase.appendingPathComponent("pdf2md/pastes")
+        do {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            // UUID garante unicidade — sem colisão por segundo-granularity
+            let destino = dir.appendingPathComponent("paste-\(UUID().uuidString).png")
+            // Tenta TIFF→PNG; fallback CGImage para formatos vetoriais (PDF, SVG no clipboard)
+            let pngData: Data
+            if let tiff = imagem.tiffRepresentation,
+               let rep = NSBitmapImageRep(data: tiff),
+               let png = rep.representation(using: .png, properties: [:]) {
+                pngData = png
+            } else if let cgImg = imagem.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+                let rep = NSBitmapImageRep(cgImage: cgImg)
+                guard let png = rep.representation(using: .png, properties: [:]) else {
+                    erroColagem = "Não foi possível converter a imagem do clipboard."
+                    return
+                }
+                pngData = png
+            } else {
+                erroColagem = "Não foi possível converter a imagem do clipboard."
+                return
+            }
+            try pngData.write(to: destino)
+            arquivosSelecionados.append(destino)  // UUID = sempre único, sem contains check
+        } catch {
+            erroColagem = "Erro ao salvar imagem: \(error.localizedDescription)"
+        }
+    }
+
     private func handleDrop(providers: [NSItemProvider]) {
         for provider in providers {
             provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
                 if let data = item as? Data,
                    let url = URL(dataRepresentation: data, relativeTo: nil) {
                     DispatchQueue.main.async {
-                        let seguro = url.resolvingSymlinksInPath()
-                        if !self.arquivosSelecionados.contains(seguro) {
-                            self.arquivosSelecionados.append(seguro)
-                        }
+                        self.adicionarSeNovo(url)
                     }
                 }
             }
@@ -284,6 +403,11 @@ struct ContentView: View {
     }
 
     private func limpar() {
+        // Deleta arquivos temporários de paste antes de limpar a lista
+        let dir = pasteDir.path + "/"
+        for url in arquivosSelecionados where url.path.hasPrefix(dir) {
+            try? FileManager.default.removeItem(at: url)
+        }
         arquivosSelecionados.removeAll()
         caminho = nil
         modoObsidian = false

@@ -100,7 +100,7 @@ def converter(
     ),
     workers: int = typer.Option(4, "--workers", "-w", help="Processos paralelos"),
     sobrescrever: bool = typer.Option(False, "--sobrescrever", help="Sobrescreve MDs existentes"),
-    vault: Path | None = typer.Option(None, "--vault", help="Path do Obsidian vault. Output vai para vault/_inbox/"),
+    vault: Path | None = typer.Option(None, "--vault", help="Path do Obsidian vault. Output vai direto para vault/"),
     obsidian: bool = typer.Option(False, "--obsidian", help="Adiciona frontmatter Obsidian ao MD"),
     json_output: bool = typer.Option(False, "--json", hidden=True, help="Output em JSON por linha"),
 ) -> None:
