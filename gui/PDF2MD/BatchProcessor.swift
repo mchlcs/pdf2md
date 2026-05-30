@@ -216,6 +216,9 @@ class BatchProcessor: ObservableObject {
     /// Formata segundos legível: "1.2s" (<1min) ou "1m02s" (>=1min).
     /// Estático para reuso no ContentView (tempo por-arquivo e total).
     static func formatarDuracao(_ seg: Double) -> String {
+        if seg < 1 {
+            return String(format: "%.0fms", seg * 1000)  // ms: conversão leva ms, não "0.0s"
+        }
         if seg < 60 {
             return String(format: "%.1fs", seg)
         }
