@@ -44,3 +44,6 @@ htmlcov/
 
 # uv
 .python-version
+
+# Briefings / notas locais — não versionar
+KIMI-BRIEFING.md
