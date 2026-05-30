@@ -116,3 +116,29 @@ resolvers espelhados; replicar o padrão para novas deps externas.
 - PR #4 (progress Ciclo 3), #5 (v0.3.0) — squash-merged em `main`, CI verde
 - DMG: `PDF2MD-v0.3.0.dmg` (84.4MB) — SHA256 `3c8177fa…a5cc64`
 - v0.2.0 mantida como release normal; v0.1.0 segue pre-release
+
+## Ciclo 5 (Patch v0.3.1 + Hill-climbing) — CONCLUÍDO ✅
+- Status: Fechado — 2026-05-29
+- Release: https://github.com/mchlcs/pdf2md/releases/tag/v0.3.1 (**Latest**)
+- Gatilho: usuário reportou tempo por-arquivo sempre "0.0s"
+
+### Correção
+- **Tempo por-arquivo "0.0s"**: conversões de texto levam milissegundos; o
+  formatador (`_fmt_duracao` / `formatarDuracao`) usava `.1f`, arredondando tudo
+  abaixo de 0.05s para "0.0s". A medição (`perf_counter`) sempre esteve correta —
+  só o display truncava. Sub-segundo agora em ms (`15ms`, `230ms`). CLI + GUI.
+  Validado no binário congelado: `relatorio.docx` 125ms, `relatorio.pdf` 230ms.
+
+### Hill-climbing (Constituição #6) — o sistema aprendeu
+- Retrospectiva gerada: `04-SYSTEM/agents/Fullstack Agent System/docs/retrospectiva-pdf2md.md`
+- **2 meta-falhas** identificadas: (1) sistema não generalizou o fix de PATH do
+  Tesseract para o antiword → 2 releases quebrados; (2) Gate 2 pulado com
+  "score estimado" → 15 bugs (3 críticos) shippados.
+- **Memória propagada**: criados `memory/{bastion,stratum,facet,sentinel,neuron,maestro}.md`
+  com os fixes em formato `DECISION/PATTERN/CONSTRAINT/FAILURE`. Agentes agora
+  leem ao iniciar task do domínio → propagam fixes entre deps da mesma classe.
+
+### Fluxo
+- PR #7 (formatador ms) — squash-merged em `main`, CI verde
+- DMG: `PDF2MD-v0.3.1.dmg` (84.4MB) — SHA256 `a8866f76…9363e`
+- Releases: v0.3.1 Latest · v0.3.0/v0.2.0 normais · v0.1.0 pre-release
