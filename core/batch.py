@@ -12,6 +12,8 @@ from core.converter import pdf_to_md
 from core.doc_converter import doc_to_md
 from core.formatter import add_obsidian_frontmatter
 from core.image_converter import image_to_md
+from core.llm_enhancer import disponivel as llm_disponivel
+from core.llm_enhancer import melhorar_markdown
 from core.pptx_converter import pptx_to_md
 from core.quality import corrigir_mojibake, limpar_artefatos, validar_qualidade
 from core.utils import (
@@ -72,6 +74,8 @@ def _processar_arquivo(
     destino_str: str,
     obsidian: bool,
     sobrescrever: bool,
+    usar_llm: bool = False,
+    llm_fallback: bool = False,
 ) -> dict:
     """
     Worker executado em ThreadPoolExecutor. Recebe/retorna tipos simples
@@ -117,9 +121,24 @@ def _processar_arquivo(
         # Pipeline de qualidade (ordem importa — ver docstring de quality.py):
         # 1. Corrigir mojibake antes de remover soft hyphens
         # 2. Limpar artefatos silenciosos
+        # 3. Validar → avisos
         md, _ = corrigir_mojibake(md)
         md = limpar_artefatos(md)
         avisos = validar_qualidade(md, origem)
+
+        # 4. LLM enhancement (opcional)
+        #    --llm       → sempre aplica
+        #    --llm-fallback → só quando há avisos de qualidade
+        if usar_llm or (llm_fallback and avisos):
+            if llm_disponivel():
+                md, avisos_llm = melhorar_markdown(md, origem)
+                # Re-valida após melhoria: avisos podem ter sumido
+                avisos = validar_qualidade(md, origem) + avisos_llm
+            elif usar_llm:
+                # Usuário pediu explicitamente mas LLM não está acessível
+                avisos.append(
+                    "LLM não disponível — verifique PDF2MD_LLM_URL e se Ollama está rodando"
+                )
 
         if obsidian:
             md = add_obsidian_frontmatter(md, origem)
@@ -159,6 +178,8 @@ def batch_convert(
     sobrescrever: bool = False,
     vault: Path | None = None,
     obsidian: bool = False,
+    usar_llm: bool = False,
+    llm_fallback: bool = False,
 ) -> list[ResultadoArquivo]:
     """
     Converte todos os arquivos suportados em `origem` para Markdown em `destino`.
@@ -243,6 +264,8 @@ def batch_convert(
                     str(dest),
                     obsidian,
                     sobrescrever,
+                    usar_llm,
+                    llm_fallback,
                 ): (arq, dest)
                 for arq, dest in tarefas
             }

@@ -110,6 +110,16 @@ def converter(
     sobrescrever: bool = typer.Option(False, "--sobrescrever", help="Sobrescreve MDs existentes"),
     vault: Path | None = typer.Option(None, "--vault", help="Path do Obsidian vault. Output vai direto para vault/"),
     obsidian: bool = typer.Option(False, "--obsidian", help="Adiciona frontmatter Obsidian ao MD"),
+    llm_fallback: bool = typer.Option(
+        False, "--llm-fallback",
+        help="Usa LLM local (Ollama) para melhorar qualidade quando detectados problemas. "
+             "Configura via PDF2MD_LLM_URL / PDF2MD_LLM_MODEL.",
+    ),
+    usar_llm: bool = typer.Option(
+        False, "--llm",
+        help="Sempre aplica LLM para pós-processamento (independente da qualidade). "
+             "Mais lento que --llm-fallback.",
+    ),
     json_output: bool = typer.Option(False, "--json", hidden=True, help="Output em JSON por linha"),
 ) -> None:
     """
@@ -168,6 +178,8 @@ def converter(
                     sobrescrever=sobrescrever,
                     vault=vault,
                     obsidian=obsidian,
+                    usar_llm=usar_llm,
+                    llm_fallback=llm_fallback,
                 )
             progress.update(task, total=len(resultados), completed=len(resultados))
     except (FileNotFoundError, NotADirectoryError) as exc:

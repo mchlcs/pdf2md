@@ -8,6 +8,7 @@ struct ContentView: View {
     @State private var arquivosSelecionados: [URL] = []
     @State private var caminho: URL?          // único campo: pasta saída ou vault
     @State private var modoObsidian: Bool = false
+    @State private var modoLLM: Bool = false      // ⚡ LLM fallback (Ollama/Gemini)
     @State private var isDragOver: Bool = false
     @State private var tarefaConversao: Task<Void, Never>?
     @State private var erroColagem: String? = nil  // nil = sem alert; non-nil = mensagem exibida
@@ -68,15 +69,28 @@ struct ContentView: View {
                     // Saída / Vault (campo unificado)
                     campoCaminho
 
-                    // Toggle Obsidian
+                    // Toggles: Obsidian + LLM fallback
                     GroupBox {
-                        Toggle("Modo Obsidian", isOn: $modoObsidian)
-                            .onChange(of: modoObsidian) { _ in
-                                caminho = nil  // limpa ao trocar modo
+                        VStack(alignment: .leading, spacing: 8) {
+                            Toggle("Modo Obsidian", isOn: $modoObsidian)
+                                .onChange(of: modoObsidian) { _ in
+                                    caminho = nil  // limpa ao trocar modo
+                                }
+                                .disabled(processador.estaProcessando)
+
+                            Divider()
+
+                            Toggle(isOn: $modoLLM) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Label("⚡ Melhorar com IA (fallback)", systemImage: "sparkles")
+                                        .font(.body)
+                                    Text("Usa LLM local (Ollama) quando qualidade baixa. Requer PDF2MD_LLM_URL.")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                }
                             }
-                            // Travado durante conversão: trocar o modo zeraria o
-                            // caminho enquanto o job já roda com o path antigo.
                             .disabled(processador.estaProcessando)
+                        }
                     }
 
                     // Botões de ação
@@ -404,7 +418,8 @@ struct ContentView: View {
                 arquivos: arquivosSelecionados,
                 destino: modoObsidian ? nil : destino,
                 vault: modoObsidian ? destino : nil,
-                obsidian: modoObsidian
+                obsidian: modoObsidian,
+                llmFallback: modoLLM
             )
         }
     }

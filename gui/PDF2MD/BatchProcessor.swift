@@ -54,7 +54,8 @@ class BatchProcessor: ObservableObject {
         arquivos: [URL],
         destino: URL?,
         vault: URL?,
-        obsidian: Bool
+        obsidian: Bool,
+        llmFallback: Bool = false
     ) async {
         guard let binario = caminhoBinario else {
             print("Binário pdf2md não encontrado no bundle")
@@ -121,6 +122,10 @@ class BatchProcessor: ObservableObject {
 
             if obsidian {
                 args.append("--obsidian")
+            }
+
+            if llmFallback {
+                args.append("--llm-fallback")
             }
 
             // --json ao final (posição correta para Typer)
