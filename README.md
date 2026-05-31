@@ -1,54 +1,54 @@
 # pdf2md
 
-Converte PDFs, imagens, Word, PPTX e planilhas em Markdown — em batch, com integração ao Obsidian vault e fallback de qualidade via LLM local.
+Convert PDFs, images, Word, PPTX and spreadsheets to Markdown — batch processing, Obsidian vault integration, and LLM-powered quality fallback.
 
 ![CI](https://github.com/mchlcs/pdf2md/actions/workflows/ci.yml/badge.svg)
 
-## Formatos suportados
+## Supported formats
 
-| Formato | Conversão |
-|---------|-----------|
-| `.pdf` | Extração nativa + OCR automático para páginas-imagem |
-| `.docx` | mammoth — preserva headers, negrito, listas, tabelas |
+| Format | Conversion |
+|--------|-----------|
+| `.pdf` | Native text extraction + automatic OCR for scanned pages |
+| `.docx` | mammoth — preserves headings, bold, lists, tables |
 | `.doc` | antiword (`brew install antiword`) |
-| `.pptx` | python-pptx — slides, títulos, tabelas |
-| `.xlsx` | openpyxl — cada sheet vira tabela Markdown |
-| `.csv` | stdlib — suporta BOM, UTF-8, Latin-1 (exports PT-BR) |
+| `.pptx` | python-pptx — slides, titles, tables |
+| `.xlsx` | openpyxl — each sheet becomes a Markdown table |
+| `.csv` | stdlib — BOM, UTF-8, Latin-1 support |
 | `.png` `.jpg` `.jpeg` `.tiff` `.webp` `.bmp` `.heic` | OCR via Tesseract |
 
-## Requisito — Tesseract OCR
+## Requirement — Tesseract OCR
 
-Necessário para PDFs escaneados e imagens com texto.
+Required for scanned PDFs and images containing text.
 
 ```bash
 brew install tesseract tesseract-lang
 ```
 
-> `tesseract-lang` inclui suporte ao **português** (`por`). Necessário para documentos PT-BR.
+> `tesseract-lang` includes Portuguese support (`por`). Required for PT-BR documents.
 
-## App macOS (GUI)
+## macOS App (GUI)
 
-1. Baixe `PDF2MD-vX.X.X.dmg` em [Releases](https://github.com/mchlcs/pdf2md/releases)
-2. Arraste **PDF2MD.app** para Applications
-3. **Primeira abertura:** clique direito → Abrir (bypass Gatekeeper — app sem assinatura paga)
-4. Instale o Tesseract (passo acima)
+1. Download `PDF2MD-vX.X.X.dmg` from [Releases](https://github.com/mchlcs/pdf2md/releases)
+2. Drag **PDF2MD.app** to Applications
+3. **First launch:** right-click → Open (Gatekeeper bypass — app is ad-hoc signed)
+4. Install Tesseract (step above)
 
-### Adicionar arquivos
+### Adding files
 
-Três formas de adicionar arquivos para conversão:
-- **Arrastar** arquivos ou pastas para a zona de drop
-- **Procurar arquivos…** — abre seletor com todos os formatos suportados
-- **Colar imagem** — cola imagem do clipboard direto na fila (screenshots, cópias de browser)
+Three ways to add files for conversion:
+- **Drag and drop** files or folders onto the drop zone
+- **Browse files…** — opens a multi-format file picker
+- **Paste image** — pastes an image from the clipboard directly into the queue (screenshots, browser copies)
 
-### Modo Obsidian
+### Obsidian mode
 
-Ative o toggle **Modo Obsidian** para:
-- Adicionar frontmatter YAML automático a cada MD gerado
-- Salvar direto na raiz do vault (selecione a pasta raiz do vault)
+Enable the **Obsidian Mode** toggle to:
+- Add automatic YAML frontmatter to each generated MD
+- Save directly to the vault root (select the vault root folder)
 
 ```yaml
 ---
-title: nome-do-arquivo
+title: filename
 source: original.pdf
 converted: 2026-05-30
 tags:
@@ -57,11 +57,11 @@ tags:
 ---
 ```
 
-### ⚡ Melhorar com IA (fallback)
+### ⚡ AI Enhance (fallback)
 
-Ative o toggle **Melhorar com IA** para usar um LLM local (Ollama) quando a conversão detecta problemas de qualidade (palavras quebradas, encoding corrompido, output muito curto).
+Enable the **AI Enhance** toggle to use a local LLM (Ollama) when conversion detects quality issues (broken words, corrupted encoding, very short output).
 
-Requer [Ollama](https://ollama.com) e a variável `PDF2MD_LLM_URL`:
+Requires [Ollama](https://ollama.com) and the `PDF2MD_LLM_URL` variable:
 
 ```bash
 brew install ollama
@@ -69,55 +69,55 @@ ollama pull llama3.2-vision
 export PDF2MD_LLM_URL=http://localhost:11434/v1
 ```
 
-Funciona também com Gemini, Groq, OpenRouter — ver seção CLI abaixo.
+Also works with Gemini, Groq, OpenRouter — see CLI section below.
 
 ## CLI
 
 ```bash
-# Instalar
-pip3 install "pdf2md[dev]"  # ou: uv sync
+# Install
+pip3 install "pdf2md[dev]"  # or: uv sync
 
-# Converter arquivo único
-pdf2md arquivo.pdf saida/
-pdf2md apresentacao.pptx saida/
-pdf2md planilha.xlsx saida/
+# Convert single file
+pdf2md file.pdf output/
+pdf2md presentation.pptx output/
+pdf2md spreadsheet.xlsx output/
 
-# Converter pasta inteira (paralelo)
-pdf2md pasta/docs/ saida/ --workers 8
+# Convert entire folder (parallel)
+pdf2md docs/ output/ --workers 8
 
-# Com frontmatter Obsidian
-pdf2md arquivo.pdf saida/ --obsidian
+# With Obsidian frontmatter
+pdf2md file.pdf output/ --obsidian
 
-# Direto no vault
-pdf2md pasta/docs/ --vault ~/Obsidian/meu-vault
+# Directly to vault
+pdf2md docs/ --vault ~/Obsidian/my-vault
 
-# LLM fallback: melhora qualidade quando há problemas detectados
-export PDF2MD_LLM_URL=http://localhost:11434/v1   # Ollama (grátis, local)
-pdf2md scan_corrompido.pdf saida/ --llm-fallback
+# LLM fallback: improves quality when issues are detected
+export PDF2MD_LLM_URL=http://localhost:11434/v1   # Ollama (free, local)
+pdf2md scanned.pdf output/ --llm-fallback
 
-# LLM sempre (independente da qualidade)
-pdf2md docs/ saida/ --llm
+# LLM always (regardless of quality)
+pdf2md docs/ output/ --llm
 ```
 
-### Configuração LLM
+### LLM configuration
 
 | Provider | PDF2MD_LLM_URL | PDF2MD_LLM_MODEL |
 |----------|----------------|------------------|
-| Ollama (local, grátis) | `http://localhost:11434/v1` | `llama3.2-vision` |
-| Gemini Flash (grátis, limite) | `https://generativelanguage.googleapis.com/v1beta/openai/` | `gemini-2.0-flash` |
-| Groq (rápido, grátis) | `https://api.groq.com/openai/v1` | `llama-3.1-8b-instant` |
+| Ollama (local, free) | `http://localhost:11434/v1` | `llama3.2-vision` |
+| Gemini Flash (free tier) | `https://generativelanguage.googleapis.com/v1beta/openai/` | `gemini-2.0-flash` |
+| Groq (fast, free) | `https://api.groq.com/openai/v1` | `llama-3.1-8b-instant` |
 
-## Pipeline de qualidade
+## Quality pipeline
 
-Cada conversão passa por um pipeline automático:
+Every conversion runs through an automatic pipeline:
 
-1. **Correção de mojibake** — corrige acentos PT-BR corrompidos (`Ã£`→`ã`, `Ã§`→`ç` etc.)
-2. **Limpeza de artefatos** — remove hifens suaves (U+00AD), espaços de largura zero, BOM mid-string
-3. **Validação** — detecta problemas residuais e exibe avisos ⚠ no CLI e GUI
+1. **Mojibake correction** — fixes corrupted accents (`Ã£`→`ã`, `Ã§`→`ç` etc.)
+2. **Artifact cleanup** — removes soft hyphens (U+00AD), zero-width chars, mid-string BOM
+3. **Validation** — detects residual issues and shows ⚠ warnings in CLI and GUI
 
-Arquivos com problemas de qualidade aparecem com ícone âmbar (✓ laranja) na GUI e status `concluido⚠` no CLI.
+Files with quality issues show an amber icon (✓ orange) in the GUI and `done⚠` status in the CLI.
 
-## Desenvolvimento
+## Development
 
 ```bash
 git clone https://github.com/mchlcs/pdf2md
@@ -129,11 +129,11 @@ uv run ruff check core/ tests/
 
 ## Stack
 
-| Componente | Tecnologia |
+| Component | Technology |
 |-----------|-----------|
 | PDF → MD | `pymupdf4llm` + `PyMuPDF` |
 | OCR | `tesseract` + `pytesseract` |
-| Imagens | `Pillow` + `pillow-heif` (HEIC) |
+| Images | `Pillow` + `pillow-heif` (HEIC) |
 | DOCX | `mammoth` |
 | DOC | `antiword` (brew) |
 | PPTX | `python-pptx` |
@@ -143,11 +143,8 @@ uv run ruff check core/ tests/
 | GUI | SwiftUI (macOS 13+) |
 | CI | GitHub Actions |
 
-## Licença
+## License
 
-Código-fonte: **MIT** — ver [LICENSE](LICENSE).
+Source code: **MIT** — see [LICENSE](LICENSE).
 
-O binário distribuído (`.dmg`) embarca **PyMuPDF** (AGPL-3.0) e outras
-bibliotecas de terceiros. A distribuição do binário está sujeita aos termos
-dessas licenças — ver [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md). O
-source correspondente é público (este repositório), cumprindo a AGPL.
+The distributed binary (`.dmg`) bundles **PyMuPDF** (AGPL-3.0) and other third-party libraries. Distribution of the binary is subject to the terms of those licenses — see [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md). The corresponding source is public (this repository), satisfying the AGPL.
