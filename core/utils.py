@@ -9,7 +9,11 @@ EXTENSOES_IMAGEM: frozenset[str] = frozenset({
     ".png", ".jpg", ".jpeg", ".tiff", ".tif", ".webp", ".bmp", ".heic"
 })
 EXTENSOES_DOC: frozenset[str] = frozenset({".doc", ".docx"})
-EXTENSOES_PERMITIDAS: frozenset[str] = EXTENSOES_PDF | EXTENSOES_IMAGEM | EXTENSOES_DOC
+EXTENSOES_PPTX: frozenset[str] = frozenset({".pptx"})
+EXTENSOES_PLANILHA: frozenset[str] = frozenset({".xlsx", ".csv"})
+EXTENSOES_PERMITIDAS: frozenset[str] = (
+    EXTENSOES_PDF | EXTENSOES_IMAGEM | EXTENSOES_DOC | EXTENSOES_PPTX | EXTENSOES_PLANILHA
+)
 
 
 def validar_path_seguro(path: Path, base_permitida: Path | None = None) -> Path:

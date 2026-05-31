@@ -1,0 +1,191 @@
+"""
+Testes para core/quality.py — limpeza de artefatos e validação de qualidade.
+"""
+
+
+from core.quality import corrigir_mojibake, limpar_artefatos, validar_qualidade
+
+# ── limpar_artefatos ─────────────────────────────────────────────────────────
+
+def test_remove_soft_hyphen():
+    """Hifens suaves (U+00AD) são removidos."""
+    texto = "pala­vra"
+    assert limpar_artefatos(texto) == "palavra"
+
+
+def test_remove_soft_hyphen_multiplos():
+    """Vários hifens suaves em sequência são todos removidos."""
+    texto = "con­ver­são"
+    assert limpar_artefatos(texto) == "conversão"
+
+
+def test_remove_zero_width_space():
+    """U+200B (zero-width space) é removido."""
+    texto = "le​tra"
+    assert limpar_artefatos(texto) == "letra"
+
+
+def test_remove_zero_width_non_joiner():
+    """U+200C (zero-width non-joiner) é removido."""
+    texto = "le‌tra"
+    assert limpar_artefatos(texto) == "letra"
+
+
+def test_remove_zero_width_joiner():
+    """U+200D (zero-width joiner) é removido."""
+    texto = "le‍tra"
+    assert limpar_artefatos(texto) == "letra"
+
+
+def test_remove_bom_mid_string():
+    """U+FEFF mid-string é removido."""
+    texto = "início﻿meio"
+    assert limpar_artefatos(texto) == "iníciomeio"
+
+
+def test_normaliza_nbsp():
+    """U+00A0 (non-breaking space) vira espaço ASCII."""
+    texto = "palavra seguinte"
+    assert limpar_artefatos(texto) == "palavra seguinte"
+
+
+def test_preserva_texto_normal():
+    """Texto limpo não é alterado."""
+    texto = "Texto normal com acentos: ção, ã, é, ó."
+    assert limpar_artefatos(texto) == texto
+
+
+def test_preserva_quebras_de_linha():
+    """Quebras de linha reais são preservadas."""
+    texto = "linha1\nlinha2\n\nlinha4"
+    resultado = limpar_artefatos(texto)
+    assert "linha1" in resultado
+    assert "linha2" in resultado
+    assert "linha4" in resultado
+
+
+def test_colapsa_linha_so_whitespace():
+    """Linha que ficou só com espaços é colapsada para linha vazia."""
+    texto = "linha1\n   \nlinha3"
+    resultado = limpar_artefatos(texto)
+    linhas = resultado.split("\n")
+    assert linhas[1] == ""
+
+
+# ── corrigir_mojibake ────────────────────────────────────────────────────────
+
+def test_corrige_ã():
+    """Ã£ → ã (padrão mais comum em PT-BR)."""
+    texto, n = corrigir_mojibake("conversiÃ£o")
+    assert "ã" in texto
+    assert n > 0
+
+
+def test_corrige_ç():
+    """Ã§ → ç."""
+    texto, n = corrigir_mojibake("Ã§")
+    assert texto == "ç"
+    assert n == 1
+
+
+def test_corrige_é():
+    """Ã© → é."""
+    texto, n = corrigir_mojibake("caf Ã©")
+    assert "é" in texto
+
+
+def test_corrige_multiplos():
+    """Múltiplos padrões corrompidos em um texto."""
+    corrompido = "integraÃ§Ã£o"  # "integração"
+    correto, n = corrigir_mojibake(corrompido)
+    assert "ç" in correto
+    assert "ã" in correto
+    assert n >= 2
+
+
+def test_sem_mojibake_retorna_inalterado():
+    """Texto sem mojibake retorna sem modificação e n=0."""
+    texto = "Texto correto com ação e coração."
+    resultado, n = corrigir_mojibake(texto)
+    assert resultado == texto
+    assert n == 0
+
+
+# ── validar_qualidade ────────────────────────────────────────────────────────
+
+def test_sem_avisos_texto_limpo(tmp_path):
+    """Texto limpo não gera avisos."""
+    f = tmp_path / "doc.pdf"
+    f.write_bytes(b"%PDF" + b"x" * 5000)  # 5KB falso
+    md = "# Título\n\nConteúdo correto com acentos: ação, coração.\n" * 20
+    avisos = validar_qualidade(md, f)
+    assert avisos == []
+
+
+def test_detecta_fffd(tmp_path):
+    """U+FFFD (char de substituição) gera aviso."""
+    f = tmp_path / "doc.pdf"
+    f.write_bytes(b"%PDF" + b"x" * 1000)
+    md = "texto com caracter� corrompido"
+    avisos = validar_qualidade(md, f)
+    assert any("FFFD" in a or "substituição" in a.lower() for a in avisos)
+
+
+def test_detecta_output_muito_curto(tmp_path):
+    """Output muito curto para arquivo grande gera aviso."""
+    f = tmp_path / "grande.pdf"
+    f.write_bytes(b"%PDF" + b"x" * 50000)  # 50KB
+    md = "curto"  # só 5 chars úteis
+    avisos = validar_qualidade(md, f)
+    assert any("curto" in a.lower() or "extração" in a.lower() for a in avisos)
+
+
+def test_nao_avisa_output_curto_arquivo_pequeno(tmp_path):
+    """Arquivo pequeno com output curto não gera aviso de output curto."""
+    f = tmp_path / "pequeno.pdf"
+    f.write_bytes(b"%PDF" + b"x" * 100)  # <1KB
+    md = "# Título"
+    avisos = validar_qualidade(md, f)
+    # Não deve ter aviso de output curto para arquivo pequeno
+    assert not any("curto" in a.lower() for a in avisos)
+
+
+def test_texto_vazio_retorna_sem_avisos(tmp_path):
+    """Texto vazio não gera avisos (é ERRO, não aviso de qualidade)."""
+    f = tmp_path / "doc.pdf"
+    f.write_bytes(b"%PDF" + b"x" * 5000)
+    avisos = validar_qualidade("", f)
+    assert avisos == []
+
+
+def test_detecta_soft_hyphens_residuais(tmp_path):
+    """Muitos hifens suaves residuais geram aviso."""
+    f = tmp_path / "doc.pdf"
+    f.write_bytes(b"%PDF" + b"x" * 1000)
+    # 10 soft hyphens — acima do threshold de 5
+    md = ("palavra­ " * 10) + "texto normal"
+    avisos = validar_qualidade(md, f)
+    assert any("hifen" in a.lower() or "00AD" in a or "suave" in a.lower() for a in avisos)
+
+
+# ── Integração: pipeline completo ────────────────────────────────────────────
+
+def test_pipeline_completo_texto_corrompido(tmp_path):
+    """
+    Texto com soft hyphen + mojibake:
+    - limpar_artefatos remove soft hyphen
+    - corrigir_mojibake corrige mojibake
+    - validar_qualidade não detecta mais os artefatos limpos
+    """
+    f = tmp_path / "doc.pdf"
+    f.write_bytes(b"%PDF" + b"x" * 5000)
+
+    texto = "pala­vra com integraÃ§Ã£o"
+    limpo = limpar_artefatos(texto)
+    corrigido, n = corrigir_mojibake(limpo)
+    avisos = validar_qualidade(corrigido, f)
+
+    assert "palavra" in corrigido
+    assert "integração" in corrigido
+    assert n >= 2
+    assert avisos == []  # depois da limpeza não há mais artefatos detectáveis

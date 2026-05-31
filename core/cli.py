@@ -2,7 +2,9 @@
 Interface de linha de comando para pdf2md.
 Uso: pdf2md INPUT OUTPUT [opções]
      pdf2md arquivo.pdf saida/
-     pdf2md pasta/pdfs/ pasta/markdowns/ --workers 8
+     pdf2md arquivo.pptx saida/
+     pdf2md planilha.xlsx saida/
+     pdf2md pasta/docs/ pasta/markdowns/ --workers 8
      pdf2md docs/ --vault ~/Obsidian/vault-michel
 """
 import json
@@ -34,10 +36,16 @@ app = typer.Typer(
 console = Console(stderr=True)
 
 
-def _emitir_json(id_: str, status: str, erro: str | None, duracao: float = 0.0) -> None:
+def _emitir_json(
+    id_: str,
+    status: str,
+    erro: str | None,
+    duracao: float = 0.0,
+    avisos: list[str] | None = None,
+) -> None:
     """Emite linha JSON no stdout para consumo pelo Swift bridge."""
     linha = json.dumps(
-        {"id": id_, "status": status, "erro": erro, "duracao": duracao},
+        {"id": id_, "status": status, "erro": erro, "duracao": duracao, "avisos": avisos or []},
         ensure_ascii=False,
     )
     sys.stdout.write(linha + "\n")
@@ -100,8 +108,18 @@ def converter(
     ),
     workers: int = typer.Option(4, "--workers", "-w", help="Processos paralelos"),
     sobrescrever: bool = typer.Option(False, "--sobrescrever", help="Sobrescreve MDs existentes"),
-    vault: Path | None = typer.Option(None, "--vault", help="Path do Obsidian vault. Output vai para vault/_inbox/"),
+    vault: Path | None = typer.Option(None, "--vault", help="Path do Obsidian vault. Output vai direto para vault/"),
     obsidian: bool = typer.Option(False, "--obsidian", help="Adiciona frontmatter Obsidian ao MD"),
+    llm_fallback: bool = typer.Option(
+        False, "--llm-fallback",
+        help="Usa LLM local (Ollama) para melhorar qualidade quando detectados problemas. "
+             "Configura via PDF2MD_LLM_URL / PDF2MD_LLM_MODEL.",
+    ),
+    usar_llm: bool = typer.Option(
+        False, "--llm",
+        help="Sempre aplica LLM para pós-processamento (independente da qualidade). "
+             "Mais lento que --llm-fallback.",
+    ),
     json_output: bool = typer.Option(False, "--json", hidden=True, help="Output em JSON por linha"),
 ) -> None:
     """
@@ -160,6 +178,8 @@ def converter(
                     sobrescrever=sobrescrever,
                     vault=vault,
                     obsidian=obsidian,
+                    usar_llm=usar_llm,
+                    llm_fallback=llm_fallback,
                 )
             progress.update(task, total=len(resultados), completed=len(resultados))
     except (FileNotFoundError, NotADirectoryError) as exc:
@@ -175,6 +195,7 @@ def converter(
                 res.status.value,
                 res.erro,
                 res.duracao,
+                res.avisos,
             )
     else:
         # Tabela de resultados
@@ -183,39 +204,62 @@ def converter(
         table.add_column("Status", style="green")
         table.add_column("Destino", style="magenta")
         table.add_column("Tempo", style="blue", justify="right")
-        table.add_column("Erro", style="red")
+        table.add_column("Erro/Aviso", style="red")
 
         for res in resultados:
-            status_color = {
-                StatusArquivo.CONCLUIDO: "green",
-                StatusArquivo.ERRO: "red",
-                StatusArquivo.IGNORADO: "yellow",
-                StatusArquivo.AGUARDANDO: "dim",
-                StatusArquivo.PROCESSANDO: "blue",
-            }.get(res.status, "white")
+            tem_avisos = bool(res.avisos)
+            if res.status == StatusArquivo.CONCLUIDO and tem_avisos:
+                status_color = "yellow"
+                status_label = "concluido⚠"  # ⚠ unicode
+            else:
+                status_color = {
+                    StatusArquivo.CONCLUIDO: "green",
+                    StatusArquivo.ERRO: "red",
+                    StatusArquivo.IGNORADO: "yellow",
+                    StatusArquivo.AGUARDANDO: "dim",
+                    StatusArquivo.PROCESSANDO: "blue",
+                }.get(res.status, "white")
+                status_label = res.status.value
+
+            nota = res.erro or (res.avisos[0] if res.avisos else "—")
 
             table.add_row(
                 res.origem.name,
-                f"[{status_color}]{res.status.value}[/{status_color}]",
+                f"[{status_color}]{status_label}[/{status_color}]",
                 res.destino.name if res.destino else "—",
                 _fmt_duracao(res.duracao) if res.duracao > 0 else "—",
-                res.erro or "—",
+                nota,
             )
 
         console.print(table)
 
         total = len(resultados)
-        sucessos = sum(1 for r in resultados if r.status == StatusArquivo.CONCLUIDO)
+        sucessos = sum(1 for r in resultados if r.status == StatusArquivo.CONCLUIDO and not r.avisos)
+        com_aviso = sum(1 for r in resultados if r.status == StatusArquivo.CONCLUIDO and r.avisos)
         erros = sum(1 for r in resultados if r.status == StatusArquivo.ERRO)
         ignorados = sum(1 for r in resultados if r.status == StatusArquivo.IGNORADO)
 
-        console.print(
-            f"\n[bold]Total:[/bold] {total} | "
-            f"[green]Sucessos:[/green] {sucessos} | "
-            f"[red]Erros:[/red] {erros} | "
-            f"[yellow]Ignorados:[/yellow] {ignorados} | "
-            f"[blue]Tempo:[/blue] {_fmt_duracao(tempo_total)}"
-        )
+        partes = [
+            f"\n[bold]Total:[/bold] {total}",
+            f"[green]OK:[/green] {sucessos}",
+        ]
+        if com_aviso:
+            partes.append(f"[yellow]Com aviso:[/yellow] {com_aviso}")
+        partes += [
+            f"[red]Erros:[/red] {erros}",
+            f"[yellow]Ignorados:[/yellow] {ignorados}",
+            f"[blue]Tempo:[/blue] {_fmt_duracao(tempo_total)}",
+        ]
+        console.print(" | ".join(partes))
+
+        # Lista avisos completos após a tabela
+        arquivos_com_aviso = [r for r in resultados if r.avisos]
+        if arquivos_com_aviso:
+            console.print("\n[yellow bold]⚠ Avisos de qualidade:[/yellow bold]")
+            for res in arquivos_com_aviso:
+                console.print(f"  [cyan]{res.origem.name}[/cyan]")
+                for aviso in res.avisos:
+                    console.print(f"    [yellow]• {aviso}[/yellow]")
 
 
 if __name__ == "__main__":

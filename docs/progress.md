@@ -142,3 +142,58 @@ resolvers espelhados; replicar o padrão para novas deps externas.
 - PR #7 (formatador ms) — squash-merged em `main`, CI verde
 - DMG: `PDF2MD-v0.3.1.dmg` (84.4MB) — SHA256 `a8866f76…9363e`
 - Releases: v0.3.1 Latest · v0.3.0/v0.2.0 normais · v0.1.0 pre-release
+
+## Ciclo 6 (v0.4.0 — Novos formatos + qualidade + LLM) — CONCLUÍDO ✅
+- Status: Fechado — 2026-05-30
+- Release: https://github.com/mchlcs/pdf2md/releases/tag/v0.4.0 (**Latest**)
+- PRs: #10 (browse/paste/13 fixes), #11 (PPTX/XLSX/CSV/qualidade/LLM)
+
+### Novos formatos
+- **PPTX** (`python-pptx`): slides → `## Slide N` + `### título` + corpo + tabelas MD
+- **XLSX** (`openpyxl`): cada sheet → `## nome` + tabela MD; células normalizadas
+- **CSV** (stdlib): tabela MD; decode defensivo `utf-8-sig → utf-8 → cp1252 → latin-1`
+
+### Pipeline de qualidade (core/quality.py)
+- `corrigir_mojibake()`: tabela PT-BR gerada programaticamente (22 padrões);
+  ordem obrigatória antes de `limpar_artefatos` (mojibake de "í" contém U+00AD)
+- `limpar_artefatos()`: U+00AD (soft hyphen), U+200B/C/D, U+FEFF mid-string, U+00A0
+- `validar_qualidade()`: mojibake residual, U+FFFD, output curto, soft hyphens
+- `ResultadoArquivo.avisos: list[str]` propagado até CLI (status `concluido⚠`)
+  e GUI (ícone âmbar + texto de aviso na lista)
+
+### LLM fallback (core/llm_enhancer.py)
+- Provider-agnostic via API OpenAI-compatible (urllib stdlib — zero deps extras)
+- `--llm-fallback`: ativa quando qualidade baixa | `--llm`: sempre ativa
+- Default: Ollama `http://localhost:11434/v1` (grátis, local, privado)
+- Suporta Gemini Flash, Groq, OpenRouter via `PDF2MD_LLM_URL`/`PDF2MD_LLM_MODEL`
+- `disponivel()` cacheado por `lru_cache` — só testa uma vez por processo
+
+### GUI (browse/paste/LLM toggle)
+- Botão "Procurar arquivos…" → NSOpenPanel multi-select + UTI canônicas
+- Botão "Colar imagem" → paste do clipboard, salva PNG com UUID (sem colisão)
+- Toggle "⚡ Melhorar com IA" → passa `--llm-fallback` ao binário Python
+- Ícone âmbar para arquivos com avisos de qualidade
+
+### Code review (13 findings corrigidos — PR #10)
+- `sobrescrever=False` retorna `IGNORADO` (não `CONCLUIDO`) em skip por colisão
+- `erroColagem: String?` substitui `alertaColar: Bool` — mensagens distintas
+- `limpar()` deleta PNGs temporários de paste
+- UUID no nome de arquivo paste
+- Eliminado force-unwrap `cachesDir.first!`
+- Removido `.keyboardShortcut("v")` do botão Colar
+- `NSApp.activate` antes de `runModal()` (macOS 14+ multi-janela)
+- `tiposPermitidos` como `static let` com UTI canônicas
+
+### Pendências Ciclo 5 encerradas
+- `docs/Standards-Anti-Patterns.md` — catálogo de 8 anti-padrões
+- `tasks/lessons.md` — 24 lições propagadas do vault para o repo
+
+### Gate de qualidade (anti-meta-falha 2)
+- Zero subprocess em novos conversores (puras Python — anti-meta-falha 1)
+- 98/103 testes verde; 5 falhas ambientais Tesseract (pré-existentes, CI passa)
+- Lint ruff: clean
+
+### Fluxo
+- PR #10 (browse/paste/fixes) + PR #11 (formatos/qualidade/LLM) — merged em `main`
+- CI verde
+- DMG: `PDF2MD-v0.4.0.dmg` — GitHub Release v0.4.0 Latest

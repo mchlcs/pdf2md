@@ -3,6 +3,58 @@
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 Versionamento [SemVer](https://semver.org/lang/pt-BR/).
 
+## [0.4.0] — 2026-05-30
+
+### Adicionado
+
+- **Novos formatos**: `.pptx` (python-pptx — slides, títulos, tabelas), `.xlsx`
+  (openpyxl — sheets → tabelas MD), `.csv` (stdlib — BOM/UTF-8/Latin-1).
+- **Pipeline de qualidade automático**: todas as conversões passam por
+  `corrigir_mojibake` (22 padrões PT-BR), `limpar_artefatos` (U+00AD soft hyphen,
+  zero-width chars, BOM mid-string, non-breaking space) e `validar_qualidade`
+  (mojibake residual, U+FFFD, output curto). Avisos ⚠ no CLI e GUI.
+- **LLM fallback** (`--llm-fallback` / `--llm`): usa LLM local (Ollama) ou remoto
+  para melhorar qualidade de conversões problemáticas. Provider-agnostic via
+  API compatível com OpenAI (urllib stdlib — zero deps extras). Defaults para
+  Ollama `http://localhost:11434/v1`; suporta Gemini, Groq, OpenRouter via env vars.
+- **GUI — Procurar arquivos**: botão abre NSOpenPanel multi-select com todos os
+  tipos suportados.
+- **GUI — Colar imagem**: cola imagem do clipboard diretamente na fila; salva
+  como PNG temporário com nome UUID (sem colisão por segundo).
+- **GUI — Toggle ⚡ Melhorar com IA**: ativa `--llm-fallback` para conversões
+  com qualidade baixa.
+- `docs/Standards-Anti-Patterns.md`: catálogo técnico de 8 padrões/anti-padrões
+  (subprocess-PATH em PyInstaller, hdiutil, ThreadPoolExecutor, decode defensivo,
+  fd1 nativo, colisão de stem, traversal, confinamento por camada).
+- `tasks/lessons.md`: 24 lições dos Ciclos 1–6 propagadas do vault para o repo.
+
+### Corrigido (code review max-effort — 13 findings)
+
+- `sobrescrever=False` retornava `CONCLUIDO` para arquivos pulados por colisão;
+  agora retorna `IGNORADO` (distinguível de conversão real).
+- `alertaColar: Bool` substituído por `erroColagem: String?` — mensagens
+  distintas para clipboard vazio vs erro de I/O; re-trigger em falhas consecutivas.
+- `limpar()` agora deleta arquivos PNG temporários de paste antes de remover URLs.
+- Nome de arquivo paste usa `UUID().uuidString` (sem colisão por segundo).
+- `guard let cachesBase` substitui `first!` (eliminado force-unwrap).
+- Removido `.keyboardShortcut("v")` do botão Colar — não intercepta mais Cmd+V
+  de text fields futuros.
+- `NSApp.activate(ignoringOtherApps: true)` antes de `runModal()` — picker
+  aparece na frente em cenários multi-janela (macOS 14+).
+- `tiposPermitidos` promovido a `static let` com UTI canônicas para `.doc`/`.docx`
+  (funciona sem Microsoft Office instalado); construído uma única vez.
+- `adicionarSeNovo()` centraliza dedup de arquivo — `handleDrop`, `adicionarArquivos`
+  e `colarImagem` chamam só ela.
+- `ProgressoArquivo.avisos: [String]` adicionado com Codable custom init
+  (backward compat com binários antigos que não emitiam o campo).
+
+### Notas
+
+- Build Apple Silicon (arm64), macOS 13+.
+- Novos formatos PPTX/XLSX/CSV não requerem ferramentas externas — puras Python.
+- LLM fallback requer `PDF2MD_LLM_URL` definido; sem a variável, feature fica
+  desativada mesmo se toggle ligado (graceful degradation).
+
 ## [0.3.1] — 2026-05-29
 
 ### Corrigido

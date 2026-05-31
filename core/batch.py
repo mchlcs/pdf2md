@@ -1,10 +1,10 @@
 """
-Orquestra conversão em batch de múltiplos arquivos (PDFs, imagens e Word).
+Orquestra conversão em batch de múltiplos arquivos (PDFs, imagens, Word, PPTX, planilhas).
 Paraleliza via ThreadPoolExecutor (compatível com PyInstaller one-file).
 """
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
@@ -12,13 +12,20 @@ from core.converter import pdf_to_md
 from core.doc_converter import doc_to_md
 from core.formatter import add_obsidian_frontmatter
 from core.image_converter import image_to_md
+from core.llm_enhancer import disponivel as llm_disponivel
+from core.llm_enhancer import melhorar_markdown
+from core.pptx_converter import pptx_to_md
+from core.quality import corrigir_mojibake, limpar_artefatos, validar_qualidade
 from core.utils import (
     EXTENSOES_DOC,
     EXTENSOES_IMAGEM,
     EXTENSOES_PDF,
     EXTENSOES_PERMITIDAS,
+    EXTENSOES_PLANILHA,
+    EXTENSOES_PPTX,
     validar_path_seguro,
 )
+from core.xlsx_converter import planilha_to_md
 
 
 class StatusArquivo(Enum):
@@ -35,7 +42,8 @@ class ResultadoArquivo:
     destino: Path | None
     status: StatusArquivo
     erro: str | None = None
-    duracao: float = 0.0  # segundos gastos na conversão deste arquivo
+    duracao: float = 0.0          # segundos gastos na conversão deste arquivo
+    avisos: list[str] = field(default_factory=list)  # avisos de qualidade (não impedem CONCLUIDO)
 
 
 def _nome_destino_unico(arq: Path, usados: set[str]) -> str:
@@ -66,6 +74,8 @@ def _processar_arquivo(
     destino_str: str,
     obsidian: bool,
     sobrescrever: bool,
+    usar_llm: bool = False,
+    llm_fallback: bool = False,
 ) -> dict:
     """
     Worker executado em ThreadPoolExecutor. Recebe/retorna tipos simples
@@ -75,14 +85,15 @@ def _processar_arquivo(
     destino = Path(destino_str)
     inicio = time.perf_counter()
 
-    # Se não sobrescrever e destino existe, pula (sem trabalho → duração 0)
+    # Se não sobrescrever e destino existe, pula — IGNORADO distingue de conversão bem-sucedida
     if not sobrescrever and destino.exists():
         return {
             "origem": origem_str,
             "destino": destino_str,
-            "status": StatusArquivo.CONCLUIDO.value,
+            "status": StatusArquivo.IGNORADO.value,
             "erro": None,
             "duracao": 0.0,
+            "avisos": [],
         }
 
     try:
@@ -93,6 +104,10 @@ def _processar_arquivo(
             md = image_to_md(origem)
         elif sufixo in EXTENSOES_DOC:
             md = doc_to_md(origem)
+        elif sufixo in EXTENSOES_PPTX:
+            md = pptx_to_md(origem)
+        elif sufixo in EXTENSOES_PLANILHA:
+            md = planilha_to_md(origem)
         else:
             return {
                 "origem": origem_str,
@@ -100,7 +115,30 @@ def _processar_arquivo(
                 "status": StatusArquivo.IGNORADO.value,
                 "erro": None,
                 "duracao": 0.0,
+                "avisos": [],
             }
+
+        # Pipeline de qualidade (ordem importa — ver docstring de quality.py):
+        # 1. Corrigir mojibake antes de remover soft hyphens
+        # 2. Limpar artefatos silenciosos
+        # 3. Validar → avisos
+        md, _ = corrigir_mojibake(md)
+        md = limpar_artefatos(md)
+        avisos = validar_qualidade(md, origem)
+
+        # 4. LLM enhancement (opcional)
+        #    --llm       → sempre aplica
+        #    --llm-fallback → só quando há avisos de qualidade
+        if usar_llm or (llm_fallback and avisos):
+            if llm_disponivel():
+                md, avisos_llm = melhorar_markdown(md, origem)
+                # Re-valida após melhoria: avisos podem ter sumido
+                avisos = validar_qualidade(md, origem) + avisos_llm
+            elif usar_llm:
+                # Usuário pediu explicitamente mas LLM não está acessível
+                avisos.append(
+                    "LLM não disponível — verifique PDF2MD_LLM_URL e se Ollama está rodando"
+                )
 
         if obsidian:
             md = add_obsidian_frontmatter(md, origem)
@@ -114,6 +152,7 @@ def _processar_arquivo(
             "status": StatusArquivo.CONCLUIDO.value,
             "erro": None,
             "duracao": round(time.perf_counter() - inicio, 3),
+            "avisos": avisos,
         }
     except Exception as exc:
         # Sanitiza mensagem de erro — não expõe paths absolutos
@@ -128,6 +167,7 @@ def _processar_arquivo(
             "status": StatusArquivo.ERRO.value,
             "erro": msg,
             "duracao": round(time.perf_counter() - inicio, 3),
+            "avisos": [],
         }
 
 
@@ -138,6 +178,8 @@ def batch_convert(
     sobrescrever: bool = False,
     vault: Path | None = None,
     obsidian: bool = False,
+    usar_llm: bool = False,
+    llm_fallback: bool = False,
 ) -> list[ResultadoArquivo]:
     """
     Converte todos os arquivos suportados em `origem` para Markdown em `destino`.
@@ -146,8 +188,9 @@ def batch_convert(
     - Se `origem` é arquivo único: processa só ele
     - Se `origem` é diretório: varre recursivamente (não recursivo por padrão — só nível raiz)
     - Arquivos com extensão não suportada: StatusArquivo.IGNORADO (sem erro)
+    - Formatos suportados: PDF, imagens (PNG/JPG/TIFF/WEBP/BMP/HEIC), DOC, DOCX, PPTX, XLSX, CSV
     - `sobrescrever=False`: pula arquivos já existentes no destino
-    - `vault` definido: output vai para `vault/_inbox/` (cria se não existir)
+    - `vault` definido: output vai direto para `vault/` (cria se não existir)
     - `obsidian=True` (ou vault definido): aplica frontmatter antes de salvar
     - Paraleliza via `concurrent.futures.ThreadPoolExecutor(max_workers=workers)`
     - Erros individuais não interrompem o batch — capturados em ResultadoArquivo.erro
@@ -157,7 +200,7 @@ def batch_convert(
         destino: Diretório de saída (criado se não existir). Ignorado se vault definido.
         workers: Número de processos paralelos.
         sobrescrever: Se True, sobrescreve MDs existentes.
-        vault: Path para raiz do Obsidian vault. Output vai para vault/_inbox/.
+        vault: Path para raiz do Obsidian vault. Output vai direto para vault/.
         obsidian: Se True, adiciona frontmatter Obsidian ao MD gerado.
 
     Returns:
@@ -176,7 +219,7 @@ def batch_convert(
     if vault is not None:
         if not vault.is_dir():
             raise NotADirectoryError(f"Vault inválido: {vault.name} não é um diretório")
-        destino = vault / "_inbox"
+        destino = vault
         obsidian = True
 
     destino.mkdir(parents=True, exist_ok=True)
@@ -221,6 +264,8 @@ def batch_convert(
                     str(dest),
                     obsidian,
                     sobrescrever,
+                    usar_llm,
+                    llm_fallback,
                 ): (arq, dest)
                 for arq, dest in tarefas
             }
@@ -235,6 +280,7 @@ def batch_convert(
                         status=StatusArquivo(res["status"]),
                         erro=res["erro"],
                         duracao=res.get("duracao", 0.0),
+                        avisos=res.get("avisos", []),
                     ))
                 except Exception as exc:
                     resultados.append(ResultadoArquivo(

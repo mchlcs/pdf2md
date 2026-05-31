@@ -6,10 +6,33 @@ import Combine
 import UserNotifications
 
 struct ProgressoArquivo: Identifiable, Codable {
-    let id: String      // path do arquivo origem
-    let status: String  // "aguardando" | "processando" | "concluido" | "erro" | "cancelado"
+    let id: String       // path do arquivo origem
+    let status: String   // "aguardando" | "processando" | "concluido" | "erro" | "cancelado" | "ignorado"
     let erro: String?
-    let duracao: Double?  // segundos da conversão (vem do JSON do core); nil até concluir
+    let duracao: Double? // segundos da conversão (vem do JSON do core); nil até concluir
+    let avisos: [String] // avisos de qualidade; [] = output limpo
+
+    // Decoder customizado: aceita JSON sem "avisos" (versões anteriores do binário)
+    private enum CodingKeys: String, CodingKey {
+        case id, status, erro, duracao, avisos
+    }
+
+    init(id: String, status: String, erro: String?, duracao: Double? = nil, avisos: [String] = []) {
+        self.id = id
+        self.status = status
+        self.erro = erro
+        self.duracao = duracao
+        self.avisos = avisos
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        status = try c.decode(String.self, forKey: .status)
+        erro = try c.decodeIfPresent(String.self, forKey: .erro)
+        duracao = try c.decodeIfPresent(Double.self, forKey: .duracao)
+        avisos = (try? c.decode([String].self, forKey: .avisos)) ?? []
+    }
 }
 
 @MainActor
@@ -31,7 +54,8 @@ class BatchProcessor: ObservableObject {
         arquivos: [URL],
         destino: URL?,
         vault: URL?,
-        obsidian: Bool
+        obsidian: Bool,
+        llmFallback: Bool = false
     ) async {
         guard let binario = caminhoBinario else {
             print("Binário pdf2md não encontrado no bundle")
@@ -98,6 +122,10 @@ class BatchProcessor: ObservableObject {
 
             if obsidian {
                 args.append("--obsidian")
+            }
+
+            if llmFallback {
+                args.append("--llm-fallback")
             }
 
             // --json ao final (posição correta para Typer)
