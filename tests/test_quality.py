@@ -3,7 +3,12 @@ Testes para core/quality.py — limpeza de artefatos e validação de qualidade.
 """
 
 
-from core.quality import corrigir_mojibake, limpar_artefatos, validar_qualidade
+from core.quality import (
+    aplicar_pipeline_qualidade,
+    corrigir_mojibake,
+    limpar_artefatos,
+    validar_qualidade,
+)
 
 # ── limpar_artefatos ─────────────────────────────────────────────────────────
 
@@ -189,3 +194,27 @@ def test_pipeline_completo_texto_corrompido(tmp_path):
     assert "integração" in corrigido
     assert n >= 2
     assert avisos == []  # depois da limpeza não há mais artefatos detectáveis
+
+
+# ── aplicar_pipeline_qualidade ──────────────────────────────────────────────
+
+def test_aplicar_pipeline_limpa_e_valida(tmp_path):
+    """Pipeline completo: mojibake + artefatos → limpo + avisos vazios."""
+    f = tmp_path / "doc.pdf"
+    f.write_bytes(b"%PDF" + b"x" * 5000)
+    # "integração" em mojibake = "integraÃ§Ã£o" + soft hyphen em "pala­vra"
+    md = "pala\u00advra com integra\u00c3\u00a7\u00c3\u00a3o"
+    resultado, avisos = aplicar_pipeline_qualidade(md, f)
+    assert "palavra" in resultado
+    assert "integração" in resultado
+    assert avisos == []
+
+
+def test_aplicar_pipeline_sem_llm_por_padrao(tmp_path):
+    """Sem usar_llm/llm_fallback, LLM não é chamado (mesmo com avisos)."""
+    f = tmp_path / "doc.pdf"
+    f.write_bytes(b"%PDF" + b"x" * 5000)
+    md = "\ufffd\ufffd texto corrompido"
+    resultado, avisos = aplicar_pipeline_qualidade(md, f, usar_llm=False, llm_fallback=False)
+    assert isinstance(avisos, list)
+    assert len(avisos) > 0  # detecta U+FFFD

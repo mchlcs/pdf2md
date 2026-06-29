@@ -4,9 +4,6 @@ Estratégia: python-pptx → extrai título + corpo + tabelas por slide.
 """
 from pathlib import Path
 
-# Extensões suportadas (fonte única — re-exportadas para utils.py)
-EXTENSOES_PPTX: frozenset[str] = frozenset({".pptx"})
-
 
 def pptx_to_md(path: Path) -> str:
     """

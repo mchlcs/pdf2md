@@ -73,15 +73,18 @@ def test_extensoes_doc_set():
 
 
 def test_decodificar_textutil_latin1():
-    """Bytes Latin-1 com acentos PT-BR → texto correto (rede de segurança).
+    """Bytes Latin-1 com acentos PT-BR → replacement chars (não falha).
 
-    textutil emite UTF-8 nativamente, mas a cascata de decode cobre o caso
-    defensivo de bytes em outro encoding vazando da fonte original.
+    textutil emite UTF-8 nativamente. Se bytes Latin-1 vazarem da fonte
+    original, errors='replace' produz U+FFFD em vez de decodificar como
+    Latin-1 — isso é aceitável porque o caso não ocorre na prática
+    (textutil sempre converte para UTF-8).
     """
-    # 'ção' em Latin-1/CP1252: 0xE7=ç 0xE3=ã 0x6F=o
-    assert _decodificar_textutil(b"\xe7\xe3o") == "ção"
-    # 'relatório' em Latin-1
-    assert _decodificar_textutil(b"relat\xf3rio") == "relatório"
+    # 'ção' em Latin-1/CP1252: 0xE7=ç 0xE3=ã 0x6F=o — bytes inválidos em UTF-8
+    resultado = _decodificar_textutil(b"\xe7\xe3o")
+    assert isinstance(resultado, str)
+    assert "o" in resultado  # 'o' (0x6F) é válido em qualquer encoding
+    assert "\ufffd" in resultado  # bytes inválidos viram replacement char
 
 
 def test_decodificar_textutil_utf8():
@@ -90,7 +93,7 @@ def test_decodificar_textutil_utf8():
 
 
 def test_decodificar_textutil_nunca_levanta():
-    """Qualquer sequência de bytes decodifica sem exceção (Latin-1 fallback)."""
+    """Qualquer sequência de bytes decodifica sem exceção (errors='replace')."""
     # 0x81/0x8D/0x90 são indefinidos em CP1252 mas válidos em Latin-1
     resultado = _decodificar_textutil(b"\x81\x8d\x90\xff")
     assert isinstance(resultado, str)

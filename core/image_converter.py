@@ -9,12 +9,9 @@ from pathlib import Path
 from PIL import Image
 from pillow_heif import register_heif_opener
 
-register_heif_opener()
+from core.utils import EXTENSOES_IMAGEM  # fonte única
 
-# Extensões suportadas (usadas também no batch e CLI para whitelist)
-EXTENSOES_IMAGEM: frozenset[str] = frozenset({
-    ".png", ".jpg", ".jpeg", ".tiff", ".tif", ".webp", ".bmp", ".heic"
-})
+register_heif_opener()
 
 # Paths comuns do Tesseract no macOS — necessário em apps PyInstaller,
 # onde o PATH do processo não inclui /opt/homebrew/bin/

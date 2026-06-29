@@ -151,3 +151,27 @@ def test_sanitiza_preserva_texto_ao_redor_do_path():
     assert resultado == (
         "ValueError: Path fora do diretório permitido: passwd (verifique permissões)"
     )
+
+
+def test_sanitiza_path_outro_usuario_nao_vaza_username():
+    """
+    Finding #5 (CWE-209): "/Users/bob" em volume compartilhado revelaria
+    o username de terceiro. Deve ser redigido para "[user]".
+    """
+    msg = "acesso negado: /Users/bob"
+    resultado = sanitizar_mensagem_erro(msg)
+    assert "bob" not in resultado
+    assert resultado == "acesso negado: [user]"
+
+
+def test_sanitiza_path_outro_usuario_com_espaco_nao_vaza_username():
+    """
+    Finding #5 com username contendo espaço: "/Users/John Doe" → "[user]".
+    A regex casa só "/Users/John" (para no espaço), mas a segunda passada
+    consome " Doe" que sobraria.
+    """
+    msg = "erro: /Users/John Doe"
+    resultado = sanitizar_mensagem_erro(msg)
+    assert "John" not in resultado
+    assert "Doe" not in resultado
+    assert resultado == "erro: [user]"

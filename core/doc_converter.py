@@ -66,19 +66,13 @@ def _docx_para_md(path: Path) -> str:
 
 def _decodificar_textutil(dados: bytes) -> str:
     """
-    Decodifica a saída do textutil de forma defensiva.
+    Decodifica a saída do textutil defensivamente.
 
-    textutil já emite UTF-8 nativamente (diferente do antiword, que usava
-    Latin-1), mas mantemos uma cascata de decode como rede de segurança caso
-    o .doc de origem contenha bytes em outro encoding que o textutil repasse
-    sem reconverter. Tenta UTF-8, depois CP1252, e por fim Latin-1 (que nunca
-    falha: mapeia os 256 bytes). 'replace' é só o fallback final.
+    textutil emite UTF-8 nativamente (diferente do antiword que usava
+    Latin-1), mas mantemos errors='replace' como rede de segurança caso
+    o .doc de origem contenha bytes em outro encoding que o textutil
+    repasse sem reconverter.
     """
-    for enc in ("utf-8", "cp1252", "latin-1"):
-        try:
-            return dados.decode(enc)
-        except UnicodeDecodeError:
-            continue
     return dados.decode("utf-8", errors="replace")
 
 

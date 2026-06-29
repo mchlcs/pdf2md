@@ -10,8 +10,8 @@
 
 **Não abra issue pública para vulnerabilidades de segurança.**
 
-Envie e-mail para: mchlcs (GitHub) — use a função "Report a vulnerability" privada do GitHub:
-`https://github.com/mchlcs/pdf2md/security/advisories/new`
+Envie e-mail para: phant0um (GitHub) — use a função "Report a vulnerability" privada do GitHub:
+`https://github.com/phant0um/pdf2md/security/advisories/new`
 
 Inclua:
 - Descrição da vulnerabilidade

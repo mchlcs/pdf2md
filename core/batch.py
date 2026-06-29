@@ -3,6 +3,7 @@ Orquestra conversão em batch de múltiplos arquivos (PDFs, imagens, Word, PPTX,
 Paraleliza via ThreadPoolExecutor (compatível com PyInstaller one-file).
 """
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from enum import Enum
@@ -12,10 +13,8 @@ from core.converter import pdf_to_md
 from core.doc_converter import doc_to_md
 from core.formatter import add_obsidian_frontmatter
 from core.image_converter import image_to_md
-from core.llm_enhancer import disponivel as llm_disponivel
-from core.llm_enhancer import melhorar_markdown
 from core.pptx_converter import pptx_to_md
-from core.quality import corrigir_mojibake, limpar_artefatos, validar_qualidade
+from core.quality import aplicar_pipeline_qualidade
 from core.utils import (
     EXTENSOES_DOC,
     EXTENSOES_IMAGEM,
@@ -27,6 +26,16 @@ from core.utils import (
     validar_path_seguro,
 )
 from core.xlsx_converter import planilha_to_md
+
+# Registry de conversores: mapeia frozenset de extensões → função conversora.
+# Adicionar um formato novo = uma linha aqui (antes eram 5 ramos if/elif).
+_CONVERSORES: list[tuple[frozenset[str], Callable[[Path], str]]] = [
+    (EXTENSOES_PDF, pdf_to_md),
+    (EXTENSOES_IMAGEM, image_to_md),
+    (EXTENSOES_DOC, doc_to_md),
+    (EXTENSOES_PPTX, pptx_to_md),
+    (EXTENSOES_PLANILHA, planilha_to_md),
+]
 
 
 class StatusArquivo(Enum):
@@ -99,17 +108,10 @@ def _processar_arquivo(
 
     try:
         sufixo = origem.suffix.lower()
-        if sufixo in EXTENSOES_PDF:
-            md = pdf_to_md(origem)
-        elif sufixo in EXTENSOES_IMAGEM:
-            md = image_to_md(origem)
-        elif sufixo in EXTENSOES_DOC:
-            md = doc_to_md(origem)
-        elif sufixo in EXTENSOES_PPTX:
-            md = pptx_to_md(origem)
-        elif sufixo in EXTENSOES_PLANILHA:
-            md = planilha_to_md(origem)
-        else:
+        conversor = next(
+            (fn for exts, fn in _CONVERSORES if sufixo in exts), None
+        )
+        if conversor is None:
             return {
                 "origem": origem_str,
                 "destino": None,
@@ -119,27 +121,10 @@ def _processar_arquivo(
                 "avisos": [],
             }
 
-        # Pipeline de qualidade (ordem importa — ver docstring de quality.py):
-        # 1. Corrigir mojibake antes de remover soft hyphens
-        # 2. Limpar artefatos silenciosos
-        # 3. Validar → avisos
-        md, _ = corrigir_mojibake(md)
-        md = limpar_artefatos(md)
-        avisos = validar_qualidade(md, origem)
+        md = conversor(origem)
 
-        # 4. LLM enhancement (opcional)
-        #    --llm       → sempre aplica
-        #    --llm-fallback → só quando há avisos de qualidade
-        if usar_llm or (llm_fallback and avisos):
-            if llm_disponivel():
-                md, avisos_llm = melhorar_markdown(md, origem)
-                # Re-valida após melhoria: avisos podem ter sumido
-                avisos = validar_qualidade(md, origem) + avisos_llm
-            elif usar_llm:
-                # Usuário pediu explicitamente mas LLM não está acessível
-                avisos.append(
-                    "LLM não disponível — verifique PDF2MD_LLM_URL e se Ollama está rodando"
-                )
+        # Pipeline de qualidade (ordem importa — ver docstring de quality.py)
+        md, avisos = aplicar_pipeline_qualidade(md, origem, usar_llm, llm_fallback)
 
         if obsidian:
             md = add_obsidian_frontmatter(md, origem)

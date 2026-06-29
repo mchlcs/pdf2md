@@ -3,6 +3,41 @@
 Based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [SemVer](https://semver.org/).
 
+## [0.4.2] — 2026-06-29
+
+### Security
+
+- **Username leak fix (CWE-209)**: `sanitizar_mensagem_erro` now redacts
+  `/Users/<username>` paths (exactly 2 segments) to `[user]` instead of
+  exposing the basename — prevents leaking another user's name in shared
+  volumes. Covers usernames with spaces (e.g. `/Users/John Doe` → `[user]`).
+
+### Changed
+
+- **Converter registry**: replaced 5-branch `if/elif` dispatch in
+  `_processar_arquivo` with a `_CONVERSORES` registry list. Adding a new
+  format is now a one-line change instead of editing the dispatch chain.
+- **Quality pipeline extracted**: `aplicar_pipeline_qualidade` in
+  `quality.py` now encapsulates the mojibake → cleanup → validate → LLM
+  chain. Makes the pipeline unit-testable without a full batch conversion.
+- **DRY: extension constants consolidated.** `EXTENSOES_IMAGEM`,
+  `EXTENSOES_PPTX`, and `EXTENSOES_PLANILHA` now live only in `utils.py`
+  (single source of truth). Converter modules import from there instead
+  of redefining duplicated frozensets.
+- **Dead code removed**:
+  - Unreachable `for/else` branch in `_csv_para_md` (`latin-1` decode
+    never fails, so the `else: raise RuntimeError` was unreachable).
+  - `_decodificar_textutil` cascade simplified to single
+    `decode("utf-8", errors="replace")` — `cp1252`/`latin-1` branches were
+    dead code since textutil always emits UTF-8.
+  - `validar_extensao` removed (never called in production or tests).
+- **Invisible Unicode chars → explicit escapes**: `quality.py` now uses
+  `\u00ad`, `\u200b`, `\u200c`, `\u200d`, `\ufeff`, `\u00a0`, `\ufffd`
+  instead of invisible literal characters — diff-safe and reviewer-obvious.
+- **README + LICENSE + SECURITY.md updated**: corrected GitHub URLs
+  (`mchlcs` → `phant0um`), `.doc` conversion description (`antiword` →
+  `textutil`), copyright holder, security advisory URL.
+
 ## [0.4.1] — 2026-06-29
 
 ### Security

@@ -2,7 +2,7 @@
 
 Convert PDFs, images, Word, PPTX and spreadsheets to Markdown — batch processing, Obsidian vault integration, and LLM-powered quality fallback.
 
-![CI](https://github.com/mchlcs/pdf2md/actions/workflows/ci.yml/badge.svg)
+![CI](https://github.com/phant0um/pdf2md/actions/workflows/ci.yml/badge.svg)
 
 ## Supported formats
 
@@ -10,7 +10,7 @@ Convert PDFs, images, Word, PPTX and spreadsheets to Markdown — batch processi
 |--------|-----------|
 | `.pdf` | Native text extraction + automatic OCR for scanned pages |
 | `.docx` | mammoth — preserves headings, bold, lists, tables |
-| `.doc` | antiword (`brew install antiword`) |
+| `.doc` | textutil (native macOS — no extra install needed) |
 | `.pptx` | python-pptx — slides, titles, tables |
 | `.xlsx` | openpyxl — each sheet becomes a Markdown table |
 | `.csv` | stdlib — BOM, UTF-8, Latin-1 support |
@@ -28,7 +28,7 @@ brew install tesseract tesseract-lang
 
 ## macOS App (GUI)
 
-1. Download `PDF2MD-vX.X.X.dmg` from [Releases](https://github.com/mchlcs/pdf2md/releases)
+1. Download `PDF2MD-vX.X.X.dmg` from [Releases](https://github.com/phant0um/pdf2md/releases)
 2. Drag **PDF2MD.app** to Applications
 3. **First launch:** right-click → Open (Gatekeeper bypass — app is ad-hoc signed)
 4. Install Tesseract (step above)
@@ -120,7 +120,7 @@ Files with quality issues show an amber icon (✓ orange) in the GUI and `done�
 ## Development
 
 ```bash
-git clone https://github.com/mchlcs/pdf2md
+git clone https://github.com/phant0um/pdf2md
 cd pdf2md
 uv sync --extra dev
 uv run pytest tests/ -v
@@ -135,7 +135,7 @@ uv run ruff check core/ tests/
 | OCR | `tesseract` + `pytesseract` |
 | Images | `Pillow` + `pillow-heif` (HEIC) |
 | DOCX | `mammoth` |
-| DOC | `antiword` (brew) |
+| DOC | `textutil` (native macOS) |
 | PPTX | `python-pptx` |
 | XLSX | `openpyxl` |
 | LLM fallback | OpenAI-compatible (Ollama/Gemini/Groq) via urllib |
