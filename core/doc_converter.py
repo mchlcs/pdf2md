@@ -3,39 +3,20 @@ Converte arquivos .docx e .doc em Markdown.
 
 Estratégia:
 - .docx → mammoth.convert_to_markdown() (estrutura preservada: headers, bold, listas)
-- .doc  → antiword via subprocess (texto plano; requer: brew install antiword)
+- .doc  → textutil via subprocess (texto plano; nativo macOS, sempre em /usr/bin/textutil)
 """
-import shutil
 import subprocess
 from pathlib import Path
 
-from core.utils import EXTENSOES_DOC  # fonte única da verdade (re-exportado)
+from core.utils import (  # fonte única da verdade (re-exportado)
+    EXTENSOES_DOC,
+    sanitizar_mensagem_erro,
+)
 
-# Paths conhecidos do antiword no macOS — necessário em apps PyInstaller, onde
-# o PATH do processo é mínimo e não inclui /opt/homebrew/bin/.
-_ANTIWORD_PATHS_MACOS = [
-    "/opt/homebrew/bin/antiword",   # Homebrew Apple Silicon (M1/M2/M3)
-    "/usr/local/bin/antiword",      # Homebrew Intel
-    "/usr/bin/antiword",            # instalação manual
-]
-
-
-def _resolver_antiword() -> str:
-    """
-    Retorna o caminho do executável antiword.
-
-    Em binários PyInstaller (.app) o PATH é mínimo e não inclui
-    /opt/homebrew/bin/, então `subprocess` não acha o antiword mesmo instalado
-    — mesmo problema que o Tesseract tinha. Procura no PATH e, em fallback, nos
-    paths conhecidos do Homebrew. Espelha _configurar_tesseract_cmd.
-    """
-    caminho = shutil.which("antiword")
-    if caminho:
-        return caminho
-    for p in _ANTIWORD_PATHS_MACOS:
-        if Path(p).exists():
-            return p
-    return "antiword"  # deixa o subprocess falhar → mensagem clara de instalação
+# textutil é um utilitário nativo do macOS (parte do CoreServices), presente
+# em todo macOS desde versões antigas, sempre em /usr/bin/textutil — diferente
+# do antiword (Homebrew), não precisa de resolução de PATH para PyInstaller.
+_TEXTUTIL_PATH = "/usr/bin/textutil"
 
 
 def doc_to_md(path: Path) -> str:
@@ -51,7 +32,7 @@ def doc_to_md(path: Path) -> str:
     Raises:
         FileNotFoundError: Se path não existe.
         ValueError: Se extensão não está em EXTENSOES_DOC.
-        RuntimeError: Se conversão falha (arquivo corrompido, antiword ausente, etc).
+        RuntimeError: Se conversão falha (arquivo corrompido, textutil ausente, etc).
     """
     if not path.exists():
         raise FileNotFoundError(f"Arquivo não encontrado: {path.name}")
@@ -83,14 +64,15 @@ def _docx_para_md(path: Path) -> str:
         ) from exc
 
 
-def _decodificar_antiword(dados: bytes) -> str:
+def _decodificar_textutil(dados: bytes) -> str:
     """
-    Decodifica a saída do antiword tolerando seu encoding padrão Latin-1/CP1252.
+    Decodifica a saída do textutil de forma defensiva.
 
-    antiword emite Latin-1 por padrão; decodificar como UTF-8 levantaria
-    UnicodeDecodeError em documentos PT-BR (ç, ã, é) — exatamente o público-alvo.
-    Tenta UTF-8, depois CP1252, e por fim Latin-1 (que nunca falha: mapeia os
-    256 bytes). Só usa 'replace' como rede de segurança final.
+    textutil já emite UTF-8 nativamente (diferente do antiword, que usava
+    Latin-1), mas mantemos uma cascata de decode como rede de segurança caso
+    o .doc de origem contenha bytes em outro encoding que o textutil repasse
+    sem reconverter. Tenta UTF-8, depois CP1252, e por fim Latin-1 (que nunca
+    falha: mapeia os 256 bytes). 'replace' é só o fallback final.
     """
     for enc in ("utf-8", "cp1252", "latin-1"):
         try:
@@ -104,10 +86,10 @@ def _doc_para_md(path: Path) -> str:
     """
     Converte .doc despachando pela assinatura do arquivo (magic bytes):
     - "PK" (zip) → na verdade é um .docx/Word-XML renomeado → mammoth
-    - OLE binário (D0 CF 11 E0) ou outro → antiword (requer: brew install antiword)
+    - OLE binário (D0 CF 11 E0) ou outro → textutil (nativo macOS)
 
-    Despachar pelo conteúdo (e não por "antiword falhou → tenta docx") evita
-    tentativas inúteis e preserva o stderr real do antiword na mensagem de erro.
+    Despachar pelo conteúdo (e não por "textutil falhou → tenta docx") evita
+    tentativas inúteis e preserva o stderr real do textutil na mensagem de erro.
     """
     with open(path, "rb") as f:
         assinatura = f.read(4)
@@ -118,23 +100,26 @@ def _doc_para_md(path: Path) -> str:
 
     try:
         # capture_output sem text=True → bytes, decodificados defensivamente
-        # (antiword usa Latin-1; UTF-8 quebraria em acentos PT-BR).
+        # (textutil normalmente emite UTF-8, mas a cascata cobre exceções).
         resultado = subprocess.run(
-            [_resolver_antiword(), str(path)],
+            [_TEXTUTIL_PATH, "-convert", "txt", "-stdout", str(path)],
             capture_output=True,
             timeout=30,
         )
         if resultado.returncode == 0:
-            return _decodificar_antiword(resultado.stdout).strip()
-        # OLE binário mas antiword falhou — erro claro com o stderr real
-        stderr_txt = _decodificar_antiword(resultado.stderr).strip()
+            return _decodificar_textutil(resultado.stdout).strip()
+        # OLE binário mas textutil falhou — erro claro com o stderr real,
+        # com o path absoluto redigido (CWE-209).
+        stderr_txt = sanitizar_mensagem_erro(
+            _decodificar_textutil(resultado.stderr).strip()
+        )
         raise RuntimeError(
-            f"Falha ao converter {path.name} — antiword: {stderr_txt}"
+            f"Falha ao converter {path.name} — textutil: {stderr_txt}"
         )
     except FileNotFoundError as exc:
         raise RuntimeError(
-            "antiword não encontrado. "
-            "Instale com: brew install antiword"
+            f"textutil não encontrado em {_TEXTUTIL_PATH}. "
+            "pdf2md requer macOS (textutil é nativo do sistema)."
         ) from exc
     except subprocess.TimeoutExpired as exc:
         raise RuntimeError(
