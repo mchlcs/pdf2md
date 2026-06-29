@@ -284,11 +284,16 @@ def batch_convert(
                         avisos=res.get("avisos", []),
                     ))
                 except Exception as exc:
+                    # Mesma sanitização aplicada em _processar_arquivo (linha
+                    # ~164) — este handler captura falhas do próprio
+                    # ThreadPoolExecutor (ex: future cancelada/exceção não
+                    # tratada) e também pode propagar paths absolutos do
+                    # usuário em str(exc) (CWE-209).
                     resultados.append(ResultadoArquivo(
                         origem=arq,
                         destino=None,
                         status=StatusArquivo.ERRO,
-                        erro=str(exc),
+                        erro=sanitizar_mensagem_erro(str(exc)),
                     ))
 
     return resultados

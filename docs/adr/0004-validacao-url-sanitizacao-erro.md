@@ -73,4 +73,47 @@ A auditoria de segurança confirmou por PoC três vulnerabilidades com veto de d
   não vazar dados sensíveis no JSON de saída.
 - Toda sanitização de path em mensagens de erro deve passar por
   `core/utils.sanitizar_mensagem_erro` — novo código que capture exceções com paths
-  do usuário deve reusar essa função em vez de reimplementar `str.replace`.
+  do usuário deve reusar essa função em vez de reimplementar `str.replace`. Isso
+  inclui o handler de exceção do `as_completed`/`future.result()` em
+  `core/batch.py` (não só o `except` interno de `_processar_arquivo`).
+
+## Addendum (re-review de segurança — segmentos de path com espaço)
+
+A regex original de `sanitizar_mensagem_erro` (`(~)?(?:/[^\s:]+)+/([^\s:/]+)`)
+parava a captura no primeiro espaço de qualquer segmento. Isso é um problema
+real em macOS, onde o username default criado pelo assistente de configuração
+é `"First Last"` (com espaço) — ex: `/Users/John Doe/Desktop/x.pdf`. Três
+falhas concretas identificadas via PoC:
+
+1. **Vazamento do username:** `/Users/John Doe/Desktop/confidential.pdf` →
+   `John Doeconfidential.pdf`. O regex casava só até o espaço em "John", e o
+   grupo de basename ficava sendo o texto residual após o último `:`/espaço
+   válido — o segmento `"John Doe"` aparecia cru na mensagem redigida.
+2. **Path relativo com espaço não era detectado:** `/nonexistent dir/file.pdf`
+   não casava com a regex (exigia 2+ segmentos sem espaço), passando direto
+   sem redação.
+3. **Path de único segmento nunca casava:** `/mountpoint` não satisfazia
+   `(?:/[^\s:]+)+/` (exige ao menos um `/segmento/` final), então nomes de
+   mountpoint/diretório de profundidade 1 vazavam sempre.
+
+**Fix:** a regex foi reescrita para permitir espaço dentro de um segmento de
+path, ancorando a captura na estrutura de path absoluto (`/` + conteúdo) e nos
+delimitadores reais de fim-de-path em mensagens de erro (aspas, parênteses,
+`:`, control chars). Para não unir incorretamente dois paths distintos
+separados por texto comum da mensagem (ex: `"copiando /a/b.pdf para
+/c/d.pdf"`), o espaço só é aceito como parte do segmento quando a palavra
+imediatamente seguinte (sem outro espaço) leva direto a uma nova barra `/` —
+isto é, o lookahead `\ (?=[^delimitadores ]*/)` exige no máximo uma palavra
+entre o espaço e o próximo `/`. Isso distingue "John Doe/Desktop" (nome de
+pasta com espaço seguido de mais path) de "origem.pdf para /outro/path.md"
+(dois paths separados por uma frase).
+
+A extração do basename deixou de depender de um grupo de captura fixo
+(`([^\s:/]+)` no final) e passou a usar `pathlib.PurePosixPath(full).name`
+sobre o match completo — robusto a qualquer número de segmentos com espaço,
+sem precisar generalizar a regex para capturar "o último segmento" via
+backtracking.
+
+Testes de regressão cobrindo os três casos do PoC (mais combinação com `~/`
+e iCloud `"Mobile Documents"`, que também tem espaço) foram adicionados em
+`tests/test_utils.py`.

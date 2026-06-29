@@ -77,6 +77,73 @@ def test_sanitiza_mensagem_sem_path_fica_inalterada():
     assert sanitizar_mensagem_erro(msg) == msg
 
 
+def test_sanitiza_path_com_espaco_no_username_nao_vaza_segmento():
+    """
+    Regressão: username default do macOS é "First Last" (com espaço). A
+    regex antiga ([^\\s:]+) parava no primeiro espaço e vazava o segmento
+    inteiro até ali (ex: "John Doe" aparecia cru na saída). A nova regex
+    permite espaço dentro do segmento e usa PurePosixPath para extrair só
+    o basename real.
+    """
+    msg = "[Errno 13] Permission denied: '/Users/John Doe/Desktop/confidential.pdf'"
+    resultado = sanitizar_mensagem_erro(msg)
+    assert "John Doe" not in resultado
+    assert "confidential.pdf" in resultado
+
+
+def test_sanitiza_path_relativo_com_espaco_no_segmento():
+    """
+    Regressão: "/nonexistent dir/file.pdf" não era redigido pela regex
+    antiga (o espaço cortava a captura antes do '/' final exigido).
+    """
+    msg = "erro: /nonexistent dir/file.pdf não encontrado"
+    resultado = sanitizar_mensagem_erro(msg)
+    assert "nonexistent dir" not in resultado
+    assert "file.pdf" in resultado
+
+
+def test_sanitiza_path_single_segmento():
+    """
+    Regressão: a regex antiga exigia (?:/[^\\s:]+)+/ — ou seja, ao menos
+    dois segmentos. Um path de único segmento como "/mountpoint" nunca
+    casava e passava direto sem redação.
+    """
+    msg = "falha ao acessar /mountpoint"
+    resultado = sanitizar_mensagem_erro(msg)
+    assert resultado == "falha ao acessar mountpoint"
+
+
+def test_sanitiza_path_home_com_espaco_no_segmento_subsequente():
+    """
+    Caso real combinado: path dentro do home (reduzido a "~") cujo
+    restante contém espaço (ex: iCloud "Mobile Documents"). Deve
+    preservar a notação "~/..." completa, sem vazar nenhum segmento
+    do home original.
+    """
+    home = str(Path.home())
+    msg = (
+        f"erro em {home}/Library/Mobile Documents/com~apple~CloudDocs/"
+        "relatorio.pdf"
+    )
+    resultado = sanitizar_mensagem_erro(msg)
+    assert home not in resultado
+    assert resultado == (
+        "erro em ~/Library/Mobile Documents/com~apple~CloudDocs/relatorio.pdf"
+    )
+
+
+def test_sanitiza_path_username_com_espaco_dentro_do_home_preservado():
+    """
+    Cenário do PoC do bloqueador #3, mas com o "home" simulado contendo
+    espaço — garante que o prefixo "~" e o restante do path (com espaço)
+    seguem preservados juntos, sem vazar apenas o fragmento do username.
+    """
+    msg = "erro em /Users/John Doe/Desktop/x.pdf"
+    resultado = sanitizar_mensagem_erro(msg)
+    assert "John Doe" not in resultado
+    assert resultado == "erro em x.pdf"
+
+
 def test_sanitiza_preserva_texto_ao_redor_do_path():
     """Texto antes/depois do path é preservado intacto."""
     msg = "ValueError: Path fora do diretório permitido: /etc/passwd (verifique permissões)"
