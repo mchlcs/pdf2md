@@ -3,6 +3,29 @@
 Based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [SemVer](https://semver.org/).
 
+## [0.4.1] — 2026-06-29
+
+### Security
+
+- **SSRF hardening (CWE-918)**: `PDF2MD_LLM_URL` now validates scheme
+  (`http`/`https` only), rejects embedded credentials, and requires a
+  non-empty host before the LLM enhancer makes any request.
+- **Error message path leak (CWE-209)**: `sanitizar_mensagem_erro` redacts
+  absolute paths in error messages via regex, replacing them with the
+  basename or a home-relative `~/...` form — covers symlink-resolved paths
+  (e.g. macOS `/var` → `/private/var`), case-insensitive filesystem
+  mismatches, and usernames containing spaces (default macOS "First Last").
+- Removed raw exception detail from LLM enhancer warnings (no longer leaks
+  internal exception text to CLI/GUI output).
+
+### Changed
+
+- **`.doc` (legacy Word) conversion: antiword → textutil.** The `antiword`
+  Homebrew formula was disabled upstream (`repo_removed`, 2024), breaking CI.
+  Replaced with `textutil` (native macOS CLI, always at `/usr/bin/textutil`,
+  no Homebrew dependency, no PyInstaller PATH-resolution hack needed).
+  `.docx` conversion via mammoth is unchanged.
+
 ## [0.4.0] — 2026-05-30
 
 ### Added

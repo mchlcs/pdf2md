@@ -23,6 +23,7 @@ from core.utils import (
     EXTENSOES_PERMITIDAS,
     EXTENSOES_PLANILHA,
     EXTENSOES_PPTX,
+    sanitizar_mensagem_erro,
     validar_path_seguro,
 )
 from core.xlsx_converter import planilha_to_md
@@ -155,12 +156,12 @@ def _processar_arquivo(
             "avisos": avisos,
         }
     except Exception as exc:
-        # Sanitiza mensagem de erro — não expõe paths absolutos
-        msg = str(exc)
-        if str(origem) in msg:
-            msg = msg.replace(str(origem), origem.name)
-        if str(destino) in msg:
-            msg = msg.replace(str(destino), destino.name)
+        # Sanitiza mensagem de erro via regex — não expõe paths absolutos.
+        # Mais robusto que comparar strings exatas: cobre symlink resolvido
+        # (ex: /var → /private/var no macOS), diferença de maiúsculas em
+        # filesystems case-insensitive e barra final, que fariam o antigo
+        # str.replace(str(origem), ...) falhar silenciosamente.
+        msg = sanitizar_mensagem_erro(str(exc))
         return {
             "origem": origem_str,
             "destino": None,
@@ -283,11 +284,16 @@ def batch_convert(
                         avisos=res.get("avisos", []),
                     ))
                 except Exception as exc:
+                    # Mesma sanitização aplicada em _processar_arquivo (linha
+                    # ~164) — este handler captura falhas do próprio
+                    # ThreadPoolExecutor (ex: future cancelada/exceção não
+                    # tratada) e também pode propagar paths absolutos do
+                    # usuário em str(exc) (CWE-209).
                     resultados.append(ResultadoArquivo(
                         origem=arq,
                         destino=None,
                         status=StatusArquivo.ERRO,
-                        erro=str(exc),
+                        erro=sanitizar_mensagem_erro(str(exc)),
                     ))
 
     return resultados

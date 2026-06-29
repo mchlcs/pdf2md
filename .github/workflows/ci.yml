@@ -18,8 +18,8 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Instalar Tesseract e antiword (OCR + Word legado)
-        run: brew install tesseract tesseract-lang antiword
+      - name: Instalar Tesseract (OCR) — .doc legado usa textutil nativo do macOS
+        run: brew install tesseract tesseract-lang
 
       - name: Instalar dependências Python
         run: |

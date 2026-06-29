@@ -5,7 +5,9 @@ Todos os testes são mockados — nenhum requer Ollama ou API key real.
 import json
 from unittest.mock import MagicMock, patch
 
-from core.llm_enhancer import disponivel, melhorar_markdown, ocr_com_visao
+import pytest
+
+from core.llm_enhancer import _url, disponivel, melhorar_markdown, ocr_com_visao
 
 # ── Helper: mock de resposta HTTP ────────────────────────────────────────────
 
@@ -19,6 +21,104 @@ def _mock_response(conteudo: str) -> MagicMock:
     resp.__enter__ = lambda s: s
     resp.__exit__ = MagicMock(return_value=False)
     return resp
+
+
+# ── _url() — validação de scheme/host/credenciais (CWE-918, CWE-209/532) ────
+
+def test_url_rejeita_scheme_file():
+    """file:// permitiria leitura arbitrária de arquivo via urlopen (SSRF)."""
+    with (
+        patch.dict("os.environ", {"PDF2MD_LLM_URL": "file:///etc/passwd"}),
+        pytest.raises(ValueError, match="http ou https"),
+    ):
+        _url()
+
+
+def test_url_rejeita_scheme_ftp():
+    """Qualquer scheme fora da allowlist {http, https} deve ser rejeitado."""
+    with (
+        patch.dict("os.environ", {"PDF2MD_LLM_URL": "ftp://exemplo.com/v1"}),
+        pytest.raises(ValueError, match="http ou https"),
+    ):
+        _url()
+
+
+def test_url_rejeita_scheme_gopher():
+    """gopher:// é um vetor SSRF clássico — deve ser bloqueado."""
+    with (
+        patch.dict("os.environ", {"PDF2MD_LLM_URL": "gopher://exemplo.com/v1"}),
+        pytest.raises(ValueError, match="http ou https"),
+    ):
+        _url()
+
+
+def test_url_rejeita_credenciais_embutidas():
+    """user:senha@host expõe segredo em logs/erros — rejeitado na origem."""
+    with (
+        patch.dict("os.environ", {"PDF2MD_LLM_URL": "https://user:chave@exemplo.com/v1"}),
+        pytest.raises(ValueError, match="credenciais"),
+    ):
+        _url()
+
+
+def test_url_rejeita_host_vazio():
+    """URL sem host (ex: scheme isolado) deve ser rejeitada."""
+    with (
+        patch.dict("os.environ", {"PDF2MD_LLM_URL": "http:///v1"}),
+        pytest.raises(ValueError, match="host"),
+    ):
+        _url()
+
+
+def test_url_aceita_http_valido():
+    """http:// com host válido é aceito normalmente."""
+    with patch.dict("os.environ", {"PDF2MD_LLM_URL": "http://localhost:11434/v1"}):
+        assert _url() == "http://localhost:11434/v1"
+
+
+def test_url_aceita_https_valido():
+    """https:// com host válido é aceito normalmente."""
+    url = "https://api.groq.com/openai/v1"
+    with patch.dict("os.environ", {"PDF2MD_LLM_URL": url}):
+        assert _url() == url
+
+
+def test_disponivel_false_quando_url_invalida():
+    """disponivel() não propaga ValueError — trata URL insegura como indisponível."""
+    disponivel.cache_clear()
+    with patch.dict("os.environ", {"PDF2MD_LLM_URL": "file:///etc/passwd"}):
+        assert disponivel() is False
+    disponivel.cache_clear()
+
+
+# ── avisos de erro não vazam detalhes (CWE-209/532) ──────────────────────────
+
+def test_melhorar_markdown_aviso_nao_expoe_detalhe_da_excecao(tmp_path):
+    """Aviso de falha contém só o nome do tipo da exceção, não sua mensagem."""
+    f = tmp_path / "doc.pdf"
+    f.write_bytes(b"x")
+    segredo = "Bearer sk-segredo-supersecreto-12345"
+
+    with patch("urllib.request.urlopen", side_effect=OSError(segredo)):
+        _, avisos = melhorar_markdown("texto", f)
+
+    assert len(avisos) == 1
+    assert segredo not in avisos[0]
+    assert "OSError" in avisos[0]
+
+
+def test_ocr_com_visao_aviso_nao_expoe_detalhe_da_excecao(tmp_path):
+    """Aviso de falha de OCR contém só o nome do tipo, não a mensagem original."""
+    img = tmp_path / "scan.png"
+    img.write_bytes(b"\x89PNG\r\n\x1a\n" + b"x" * 100)
+    segredo = "token=abc123secreto"
+
+    with patch("urllib.request.urlopen", side_effect=OSError(segredo)):
+        _, avisos = ocr_com_visao(img)
+
+    assert len(avisos) == 1
+    assert segredo not in avisos[0]
+    assert "OSError" in avisos[0]
 
 
 # ── disponivel() ─────────────────────────────────────────────────────────────

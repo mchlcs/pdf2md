@@ -32,6 +32,7 @@ import os
 import urllib.request
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import urlsplit
 
 # ── Configuração ──────────────────────────────────────────────────────────────
 
@@ -39,9 +40,36 @@ _URL_PADRAO = "http://localhost:11434/v1"
 _MODELO_PADRAO = "llama3.2-vision"
 _TIMEOUT_PADRAO = 120
 
+# Schemes aceitos para a URL do LLM — bloqueia file://, ftp://, gopher:// etc.
+# que permitiriam SSRF/leitura arbitrária de arquivo via urlopen (CWE-918).
+_SCHEMES_PERMITIDOS = frozenset({"http", "https"})
+
 
 def _url() -> str:
-    return os.getenv("PDF2MD_LLM_URL", _URL_PADRAO).rstrip("/")
+    """
+    Lê e valida PDF2MD_LLM_URL.
+
+    Aplica allowlist de scheme (http/https) e rejeita credenciais embutidas
+    na URL (user:pass@host) — mitigação de SSRF (CWE-918) e de leak de
+    credenciais em logs/erros (CWE-209/532).
+
+    Returns:
+        URL validada, sem barra final.
+
+    Raises:
+        ValueError: Se scheme não permitido, host vazio ou houver userinfo.
+    """
+    bruta = os.getenv("PDF2MD_LLM_URL", _URL_PADRAO).rstrip("/")
+    partes = urlsplit(bruta)
+
+    if partes.scheme not in _SCHEMES_PERMITIDOS:
+        raise ValueError("PDF2MD_LLM_URL deve usar http ou https")
+    if not partes.hostname:
+        raise ValueError("PDF2MD_LLM_URL deve conter um host válido")
+    if partes.username:
+        raise ValueError("credenciais não devem ser embutidas na URL")
+
+    return bruta
 
 
 def _modelo() -> str:
@@ -124,7 +152,11 @@ def disponivel() -> bool:
     Returns:
         True se o endpoint respondeu. False se não configurado ou inacessível.
     """
-    url = _url()
+    try:
+        url = _url()
+    except ValueError:
+        # URL malformada/insegura — trata como indisponível, não propaga.
+        return False
     # Se usar o default e PDF2MD_LLM_URL não estiver definido, só testa se
     # explicitamente configurado — evita timeout em máquinas sem Ollama.
     if url == _URL_PADRAO and "PDF2MD_LLM_URL" not in os.environ:
@@ -165,7 +197,9 @@ def melhorar_markdown(md: str, origem: Path) -> tuple[str, list[str]]:
             resultado = resultado + "\n\n" + md[12000:]
         return resultado, []
     except Exception as exc:
-        return md, [f"LLM enhancement falhou ({type(exc).__name__}): {exc}"]
+        # Não inclui str(exc) no aviso — pode conter URL, credencial ou path
+        # do ambiente (CWE-209/532). Só o nome do tipo é exposto.
+        return md, [f"LLM enhancement falhou ({type(exc).__name__})"]
 
 
 def ocr_com_visao(imagem_path: Path) -> tuple[str, list[str]]:
@@ -203,4 +237,5 @@ def ocr_com_visao(imagem_path: Path) -> tuple[str, list[str]]:
         resultado = _completar([mensagem_visao])
         return resultado, []
     except Exception as exc:
-        return "", [f"OCR com visão falhou ({type(exc).__name__}): {exc}"]
+        # Idem: não inclui str(exc) no aviso (CWE-209/532).
+        return "", [f"OCR com visão falhou ({type(exc).__name__})"]

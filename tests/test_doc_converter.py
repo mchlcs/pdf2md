@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from core.doc_converter import EXTENSOES_DOC, _decodificar_antiword, doc_to_md
+from core.doc_converter import EXTENSOES_DOC, _decodificar_textutil, doc_to_md
 
 
 def _criar_docx_simples(path: Path, texto: str = "Conteúdo de teste Word.") -> None:
@@ -72,53 +72,52 @@ def test_extensoes_doc_set():
     assert ".docx" in EXTENSOES_DOC
 
 
-def test_decodificar_antiword_latin1():
-    """Bytes Latin-1 (antiword padrão) com acentos PT-BR → texto correto.
+def test_decodificar_textutil_latin1():
+    """Bytes Latin-1 com acentos PT-BR → texto correto (rede de segurança).
 
-    Regressão: com text=True o subprocess decodificava como UTF-8 e
-    levantava UnicodeDecodeError em .doc com ç/ã/é.
+    textutil emite UTF-8 nativamente, mas a cascata de decode cobre o caso
+    defensivo de bytes em outro encoding vazando da fonte original.
     """
     # 'ção' em Latin-1/CP1252: 0xE7=ç 0xE3=ã 0x6F=o
-    assert _decodificar_antiword(b"\xe7\xe3o") == "ção"
+    assert _decodificar_textutil(b"\xe7\xe3o") == "ção"
     # 'relatório' em Latin-1
-    assert _decodificar_antiword(b"relat\xf3rio") == "relatório"
+    assert _decodificar_textutil(b"relat\xf3rio") == "relatório"
 
 
-def test_decodificar_antiword_utf8():
-    """Saída já em UTF-8 é decodificada corretamente (sem corromper)."""
-    assert _decodificar_antiword("olá ção".encode()) == "olá ção"
+def test_decodificar_textutil_utf8():
+    """Saída já em UTF-8 (padrão do textutil) é decodificada corretamente."""
+    assert _decodificar_textutil("olá ção".encode()) == "olá ção"
 
 
-def test_decodificar_antiword_nunca_levanta():
+def test_decodificar_textutil_nunca_levanta():
     """Qualquer sequência de bytes decodifica sem exceção (Latin-1 fallback)."""
     # 0x81/0x8D/0x90 são indefinidos em CP1252 mas válidos em Latin-1
-    resultado = _decodificar_antiword(b"\x81\x8d\x90\xff")
+    resultado = _decodificar_textutil(b"\x81\x8d\x90\xff")
     assert isinstance(resultado, str)
 
 
-def test_resolver_antiword_usa_which(monkeypatch):
-    """Com antiword no PATH, _resolver_antiword retorna o caminho do which."""
-    import core.doc_converter as dc
-    monkeypatch.setattr(dc.shutil, "which", lambda nome: "/fake/bin/antiword")
-    assert dc._resolver_antiword() == "/fake/bin/antiword"
+def test_doc_ole_real_via_textutil(tmp_path):
+    """.doc OLE binário real (gerado pelo próprio textutil) → conversão end-to-end.
 
+    Cobre o caminho real de _doc_para_md com subprocess de verdade (sem mock),
+    validando que a troca antiword→textutil funciona com um arquivo OLE
+    legítimo (assinatura D0 CF 11 E0), não apenas com .docx disfarçado de .doc.
+    """
+    import subprocess as sp
+    txt_path = tmp_path / "fonte.txt"
+    txt_path.write_text("Conteúdo de teste com acentuação: ção ã é.", encoding="utf-8")
+    doc_path = tmp_path / "legado.doc"
+    sp.run(
+        ["/usr/bin/textutil", "-convert", "doc", str(txt_path), "-output", str(doc_path)],
+        check=True,
+        timeout=30,
+    )
+    with open(doc_path, "rb") as f:
+        assert f.read(4) == b"\xd0\xcf\x11\xe0"  # confirma OLE binário real
 
-def test_resolver_antiword_fallback_homebrew(monkeypatch, tmp_path):
-    """Sem antiword no PATH (binário PyInstaller), cai nos paths do Homebrew."""
-    import core.doc_converter as dc
-    monkeypatch.setattr(dc.shutil, "which", lambda nome: None)
-    falso = tmp_path / "antiword"
-    falso.write_text("")
-    monkeypatch.setattr(dc, "_ANTIWORD_PATHS_MACOS", [str(falso)])
-    assert dc._resolver_antiword() == str(falso)
-
-
-def test_resolver_antiword_ausente(monkeypatch):
-    """Sem antiword em lugar nenhum → retorna literal 'antiword' (subprocess falha claro)."""
-    import core.doc_converter as dc
-    monkeypatch.setattr(dc.shutil, "which", lambda nome: None)
-    monkeypatch.setattr(dc, "_ANTIWORD_PATHS_MACOS", ["/nao/existe/antiword"])
-    assert dc._resolver_antiword() == "antiword"
+    md = doc_to_md(doc_path)
+    assert "Conteúdo de teste" in md
+    assert "ção" in md
 
 
 def test_batch_docx(tmp_path):
