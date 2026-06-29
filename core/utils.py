@@ -1,7 +1,16 @@
 """
 Utilitários de segurança e validação para pdf2md.
 """
+import re
 from pathlib import Path
+
+# Casa qualquer sequência de segmentos absolutos "/algo/algo/.../arquivo"
+# e captura só o último segmento (basename). Cobre Unix e o prefixo POSIX
+# usado mesmo em paths do Windows resolvidos internamente pelo Python.
+# O grupo opcional "~" no início preserva esse prefixo intacto quando
+# presente (path relativo ao home já reduzido por sanitizar_mensagem_erro),
+# evitando que a regex comprima também os segmentos intermediários.
+_RE_PATH_ABSOLUTO = re.compile(r"(~)?(?:/[^\s:]+)+/([^\s:/]+)")
 
 # Extensões suportadas
 EXTENSOES_PDF: frozenset[str] = frozenset({".pdf"})
@@ -58,3 +67,42 @@ def validar_extensao(path: Path) -> None:
     """
     if path.suffix.lower() not in EXTENSOES_PERMITIDAS:
         raise ValueError(f"Extensão não suportada: {path.suffix}")
+
+
+def sanitizar_mensagem_erro(msg: str) -> str:
+    """
+    Redige qualquer caminho absoluto presente em uma mensagem de erro,
+    substituindo-o pelo basename (nome do arquivo/diretório final).
+
+    Mais robusto que `str.replace(str(origem), origem.name)`: aquela
+    abordagem falha quando o path na mensagem de exceção não é
+    byte-a-byte idêntico ao path original — ex. symlink resolvido
+    (`/var/...` → `/private/var/...` no macOS), diferença de
+    maiúsculas/minúsculas em filesystems case-insensitive, ou barra
+    final. Esta função usa regex sobre QUALQUER path absoluto na
+    mensagem, independente de sua origem (CWE-209).
+
+    O prefixo correspondente ao home do usuário (`Path.home()`) é
+    reduzido a `~` antes da regex de basename — assim mensagens como
+    "/Users/alice/projeto/x.pdf" preservam o contexto relativo ao home
+    ("~/projeto/x.pdf") em vez de virarem apenas "x.pdf".
+
+    Args:
+        msg: Mensagem de erro potencialmente contendo paths absolutos.
+
+    Returns:
+        Mensagem com paths absolutos substituídos pelo basename (ou por
+        "~/..." quando o path está dentro do home do usuário).
+    """
+    home = str(Path.home())
+    if home and home in msg:
+        msg = msg.replace(home, "~")
+
+    def _substituir(m: re.Match[str]) -> str:
+        prefixo_home, basename = m.group(1), m.group(2)
+        # Se o match começa com "~", preserva o caminho relativo completo
+        # (ex: "~/projeto/sub/x.pdf") em vez de reduzir a só o basename —
+        # já não há mais informação sensível de path absoluto do sistema.
+        return m.group(0) if prefixo_home else basename
+
+    return _RE_PATH_ABSOLUTO.sub(_substituir, msg)
