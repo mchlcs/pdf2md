@@ -197,3 +197,44 @@ resolvers espelhados; replicar o padrão para novas deps externas.
 - PR #10 (browse/paste/fixes) + PR #11 (formatos/qualidade/LLM) — merged em `main`
 - CI verde
 - DMG: `PDF2MD-v0.4.0.dmg` — GitHub Release v0.4.0 Latest
+
+## Ciclo 7 (Revisão + hardening de segurança) — EM ANDAMENTO 🔄
+- Status: Aberto — 2026-06-29
+- Gatilho: usuário pediu revisão do projeto
+- Branch: `security/ssrf-credleak-pathleak-fixes` (não mergeada)
+
+### Diagnóstico inicial (ground-truth)
+- 103/103 testes verde, ruff clean, zero paths hardcoded, tree limpo
+- ~~Discrepância: tag v0.4.0 ausente~~ → **resolvido**: tag `v0.4.0` EXISTE em
+  `origin` → `fd0896e` (= release). Só não estava fetchada local. Repo
+  renomeado `mchlcs/pdf2md` → `phant0um/pdf2md`.
+- **Bloqueio novo:** CI quebrado pré-existente — `ci.yml` faz `brew install
+  antiword`, fórmula disabled no homebrew-core (repo_removed, 2024). Falha
+  qualquer PR. Não causado pelos fixes de segurança.
+
+### Gate de qualidade — Forge 5E
+- Score **79/100 — PASS** (threshold 75). Zero crítico.
+- Achados: 4 Alto (3 de segurança), 5 Médio, 3 Baixo. Top-3 refactors registrados.
+
+### Auditoria de segurança (Sentinel — veto + PoC runtime)
+- **FAIL inicial** → 3 vulns confirmadas por PoC:
+  - #1 **SSRF/file:// read** (Crítico, CVSS 8.1, CWE-918) — `_url()` sem allowlist de scheme
+  - #2 cred/info leak (Baixo, CWE-209/532) — `{exc}` em avisos → stdout JSON
+  - #3 path leak (Médio→Alto, CWE-209) — sanitizador `str.replace` ingênuo
+- backend-dev fix iter.1: urlsplit allowlist + drop `{exc}` + regex sanitizer + ADR 0004
+- **Re-review 1: FAIL residual** — #3 regex `[^\s:]+` parava no espaço → username
+  macOS "First Last" vazava. Novo #4: handler externo `batch.py:291` não-sanitizado.
+- backend-dev fix iter.2 (commit `5119fac`): regex aceita espaço por lookahead +
+  `PurePosixPath.name`, `batch.py:286-292` sanitizado, +5 testes regressão
+- **Re-review final: PASS — veto LEVANTADO.** #1/#2/#3/#4 fechados com PoC.
+  ReDoS check 50k chars/3.24ms. 126/126 verde, ruff clean.
+
+### Follow-up (não-bloqueante)
+- #5 (Low, CWE-209): path home de OUTRO usuário 2-segmentos (`/Users/alice`→`alice`)
+  revela username em volume compartilhado. Tracked p/ release futuro.
+- Refactors Forge: extrair pipeline qualidade (`batch.py`), funções longas
+  (`pdf_to_md`/`_processar_arquivo`), dead-code latin-1 (`doc_converter.py:100`)
+
+### Pendente (RED — requer confirmação)
+- Merge `security/ssrf-credleak-pathleak-fixes` → `main` (via PR, CI verde)
+- `infra-cloud`: criar tag `v0.4.0` + reconciliar GitHub Release (atualmente ausente)
