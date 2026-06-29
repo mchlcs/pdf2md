@@ -11,9 +11,6 @@ obsoleto desde Excel 2007. Usuários devem converter para .xlsx primeiro.
 import csv
 from pathlib import Path
 
-# Extensões suportadas (fonte única — re-exportadas para utils.py)
-EXTENSOES_PLANILHA: frozenset[str] = frozenset({".xlsx", ".csv"})
-
 
 def planilha_to_md(path: Path) -> str:
     """
@@ -89,6 +86,9 @@ def _xlsx_para_md(path: Path) -> str:
 def _csv_para_md(path: Path) -> str:
     """Converte .csv em Markdown usando stdlib csv."""
     # utf-8-sig lida com BOM do Excel (arquivos exportados do Windows)
+    # Cascata de decode: latin-1 nunca falha (mapeia 256 bytes) — garante
+    # que qualquer arquivo é lido, mesmo com encoding exótico.
+    rows = None
     for enc in ("utf-8-sig", "utf-8", "cp1252", "latin-1"):
         try:
             with open(path, newline="", encoding=enc) as f:
@@ -96,8 +96,6 @@ def _csv_para_md(path: Path) -> str:
             break
         except UnicodeDecodeError:
             continue
-    else:
-        raise RuntimeError(f"Não foi possível decodificar CSV: {path.name}")
 
     if not rows:
         return ""

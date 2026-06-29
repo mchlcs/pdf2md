@@ -31,7 +31,7 @@ _RE_PATH_ABSOLUTO = re.compile(
     r"(~)?(?:/(?:[^/\x00-\x1f:'\")( ]|\ (?=[^/\x00-\x1f:'\")( ]*/))+)+"
 )
 
-# Extensões suportadas
+# Extensões suportadas — fonte única da verdade (converters importam daqui)
 EXTENSOES_PDF: frozenset[str] = frozenset({".pdf"})
 EXTENSOES_IMAGEM: frozenset[str] = frozenset({
     ".png", ".jpg", ".jpeg", ".tiff", ".tif", ".webp", ".bmp", ".heic"
@@ -74,20 +74,6 @@ def validar_path_seguro(path: Path, base_permitida: Path | None = None) -> Path:
     return path_resolvido
 
 
-def validar_extensao(path: Path) -> None:
-    """
-    Valida que a extensão do arquivo está na whitelist.
-
-    Args:
-        path: Path do arquivo.
-
-    Raises:
-        ValueError: Se extensão não está em EXTENSOES_PERMITIDAS.
-    """
-    if path.suffix.lower() not in EXTENSOES_PERMITIDAS:
-        raise ValueError(f"Extensão não suportada: {path.suffix}")
-
-
 def sanitizar_mensagem_erro(msg: str) -> str:
     """
     Redige qualquer caminho absoluto presente em uma mensagem de erro,
@@ -105,6 +91,11 @@ def sanitizar_mensagem_erro(msg: str) -> str:
     reduzido a `~` antes da regex de basename — assim mensagens como
     "/Users/alice/projeto/x.pdf" preservam o contexto relativo ao home
     ("~/projeto/x.pdf") em vez de virarem apenas "x.pdf".
+
+    Paths absolutos de OUTRO usuário (ex: "/Users/bob/..." quando o
+    home do usuário atual é "/Users/alice") são redigidos ao basename
+    do arquivo, sem revelar o username de terceiro (CWE-209 — útil em
+    volumes compartilhados).
 
     Args:
         msg: Mensagem de erro potencialmente contendo paths absolutos.
@@ -124,6 +115,24 @@ def sanitizar_mensagem_erro(msg: str) -> str:
         # já não há mais informação sensível de path absoluto do sistema.
         if m.group(1):
             return full
+        # Caso especial: "/Users/<username>" (exatamente 2 segmentos no
+        # padrão macOS) — o basename IS o username, que seria vazado.
+        # Redige para "[user]" em vez de expor o nome (CWE-209).
+        # Quando o username contém espaço (ex: "/Users/John Doe"), a
+        # regex casa só "/Users/John" — detectamos esse caso e consomimos
+        # o restante " Doe" da string original para não vazar.
+        if full.startswith("/Users/") and full.count("/") == 2:
+            # Tenta consumir segmento seguinte com espaço (ex: " Doe")
+            # Olhando o sufixo da string após o match.
+            end = m.end()
+            resto = msg[end:]
+            # Se há " <palavra>" imediatamente após (sem outra barra),
+            # é parte do username com espaço — redige junto.
+            match_resto = re.match(r" (\S+)", resto)
+            if match_resto:
+                # Consome o resto no match — ajustamos end via sub
+                return "[user]"  # o resto " Doe" ainda fica; tratado abaixo
+            return "[user]"
         # PurePosixPath.name extrai o último segmento mesmo quando os
         # segmentos intermediários contêm espaço (ex: "/Users/John Doe/
         # Desktop/x.pdf" → "x.pdf", sem vazar "John Doe"). Fallback para
@@ -131,4 +140,9 @@ def sanitizar_mensagem_erro(msg: str) -> str:
         # ocorrer dado que a regex exige ao menos um "/<algo>").
         return PurePosixPath(full).name or full
 
-    return _RE_PATH_ABSOLUTO.sub(_substituir, msg)
+    # Primeiro passa: redige paths normais
+    msg = _RE_PATH_ABSOLUTO.sub(_substituir, msg)
+    # Segunda passada: redige "[user] <palavra>" onde "<palavra>" é o
+    # restante de um username com espaço que a regex não capturou.
+    msg = re.sub(r"\[user\] \S+", "[user]", msg)
+    return msg

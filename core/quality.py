@@ -27,6 +27,9 @@ de mojibake não consegue mais detectar.
 """
 from pathlib import Path
 
+from core.llm_enhancer import disponivel as llm_disponivel
+from core.llm_enhancer import melhorar_markdown
+
 # ── Tabela de mojibake PT-BR (gerada programaticamente) ─────────────────────
 # Mojibake ocorre quando texto Latin-1/cp1252 é decodificado como UTF-8.
 # Cada char Latin-1 vira 2 bytes UTF-8 que, relidos como Latin-1, produzem
@@ -107,12 +110,12 @@ def limpar_artefatos(texto: str) -> str:
     Returns:
         String limpa. Nunca modifica conteúdo semântico real.
     """
-    texto = texto.replace("­", "")  # SOFT HYPHEN
-    texto = texto.replace("​", "")  # ZERO WIDTH SPACE
-    texto = texto.replace("‌", "")  # ZERO WIDTH NON-JOINER
-    texto = texto.replace("‍", "")  # ZERO WIDTH JOINER
-    texto = texto.replace("﻿", "")  # BOM mid-string
-    texto = texto.replace(" ", " ") # NO-BREAK SPACE → espaço normal
+    texto = texto.replace("\u00ad", "")   # SOFT HYPHEN
+    texto = texto.replace("\u200b", "")   # ZERO WIDTH SPACE
+    texto = texto.replace("\u200c", "")   # ZERO WIDTH NON-JOINER
+    texto = texto.replace("\u200d", "")   # ZERO WIDTH JOINER
+    texto = texto.replace("\ufeff", "")  # BOM mid-string
+    texto = texto.replace("\u00a0", " ") # NO-BREAK SPACE → espaço normal
 
     # Colapsa linhas que ficaram só com whitespace (preserva estrutura de parágrafos)
     linhas = [linha if linha.strip() else "" for linha in texto.split("\n")]
@@ -157,7 +160,7 @@ def validar_qualidade(md: str, origem: Path) -> list[str]:
         )
 
     # 2. Chars de substituição U+FFFD
-    n_fffd = md.count("�")
+    n_fffd = md.count("\ufffd")
     if n_fffd > 0:
         avisos.append(
             f"{n_fffd} caractere(s) de substituição (U+FFFD) detectado(s) — "
@@ -177,7 +180,7 @@ def validar_qualidade(md: str, origem: Path) -> list[str]:
         pass
 
     # 4. Hifens suaves residuais acima de threshold
-    n_soft_hyphen = md.count("­")
+    n_soft_hyphen = md.count("\u00ad")
     if n_soft_hyphen > 5:
         avisos.append(
             f"{n_soft_hyphen} hifens suaves (U+00AD) residuais — palavras podem "
@@ -185,3 +188,45 @@ def validar_qualidade(md: str, origem: Path) -> list[str]:
         )
 
     return avisos
+
+
+# ── 3. Orquestração do pipeline completo ──────────────────────────────────────
+
+def aplicar_pipeline_qualidade(
+    md: str,
+    origem: Path,
+    usar_llm: bool = False,
+    llm_fallback: bool = False,
+) -> tuple[str, list[str]]:
+    """
+    Aplica o pipeline completo de qualidade ao Markdown extraído.
+
+    Ordem obrigatória (ver docstring do módulo):
+    1. corrigir_mojibake — antes de limpar_artefatos
+    2. limpar_artefatos — remove soft hyphens etc.
+    3. validar_qualidade — detecta problemas residuais → avisos
+    4. LLM enhancement (opcional) — melhora qualidade via LLM
+
+    Args:
+        md: Markdown bruto extraído pelo conversor.
+        origem: Path do arquivo de origem (para contexto no LLM e validar_qualidade).
+        usar_llm: Se True, sempre aplica LLM (--llm).
+        llm_fallback: Se True, aplica LLM só quando há avisos (--llm-fallback).
+
+    Returns:
+        (md_tratado, avisos) — avisos é lista vazia se qualidade OK.
+    """
+    md, _ = corrigir_mojibake(md)
+    md = limpar_artefatos(md)
+    avisos = validar_qualidade(md, origem)
+
+    if usar_llm or (llm_fallback and avisos):
+        if llm_disponivel():
+            md, avisos_llm = melhorar_markdown(md, origem)
+            avisos = validar_qualidade(md, origem) + avisos_llm
+        elif usar_llm:
+            avisos.append(
+                "LLM não disponível — verifique PDF2MD_LLM_URL e se Ollama está rodando"
+            )
+
+    return md, avisos
