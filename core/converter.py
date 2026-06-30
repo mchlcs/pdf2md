@@ -98,7 +98,7 @@ def _processar_pagina(
 
     if len(texto_pagina.strip()) >= _MIN_TEXTO_PAGINA:
         if ignorar_margens > 0:
-            return _texto_filtrado_margens(pagina)
+            return _texto_filtrado_margens(pagina, ignorar_margens)
         return _texto_nativo_pagina(num_pagina, chunks, texto_pagina)
 
     return _ocr_pagina(pagina)
@@ -113,11 +113,11 @@ def _texto_nativo_pagina(num_pagina: int, chunks: list[dict], texto_bruto: str) 
     return texto_bruto.strip()
 
 
-def _texto_filtrado_margens(pagina: fitz.Page) -> str:
-    """Extrai texto da página ignorando blocos dentro das margens vertical e inferior."""
+def _texto_filtrado_margens(pagina: fitz.Page, margem_pct: float) -> str:
+    """Extrai texto da página ignorando blocos dentro da margem superior e inferior."""
     dados = pagina.get_text("dict")
     altura = pagina.rect.height
-    margem_px = altura * (_MARGEM_PADRAO_PCT / 100.0)
+    margem_px = altura * (margem_pct / 100.0)
     topo_limite = margem_px
     rodape_limite = altura - margem_px
 
