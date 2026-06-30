@@ -176,20 +176,20 @@ def test_batch_path_traversal(tmp_path):
         )
 
 
-def test_batch_duracao_registrada(tmp_path):
-    """ResultadoArquivo.duracao é preenchida (> 0) para conversão real."""
+def test_batch_sem_duracao_por_arquivo(tmp_path):
+    """ResultadoArquivo não tem mais campo duracao — tempo é só total (CLI)."""
     entrada = tmp_path / "entrada"
     entrada.mkdir()
     doc = fitz.open()
     p = doc.new_page(width=595, height=842)
-    p.insert_text((50, 50), "Texto suficiente para validar a duracao da conversao do PDF.")
+    p.insert_text((50, 50), "Texto suficiente para validar a conversao do PDF.")
     doc.save(str(entrada / "doc.pdf"))
     doc.close()
 
     resultados = batch_convert(origem=entrada, destino=tmp_path / "saida", workers=1)
     assert len(resultados) == 1
     assert resultados[0].status == StatusArquivo.CONCLUIDO
-    assert resultados[0].duracao > 0  # tempo real de conversão registrado
+    assert not hasattr(resultados[0], "duracao")  # campo removido
 
 
 def test_batch_colisao_stem_nao_perde_dados(tmp_path):

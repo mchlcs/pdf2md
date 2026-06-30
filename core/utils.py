@@ -28,7 +28,7 @@ from pathlib import Path, PurePosixPath
 # presente (path relativo ao home já reduzido por sanitizar_mensagem_erro),
 # evitando que a regex comprima também os segmentos intermediários.
 _RE_PATH_ABSOLUTO = re.compile(
-    r"(~)?(?:/(?:[^/\x00-\x1f:'\")( ]|\ (?=[^/\x00-\x1f:'\")( ]*/))+)+"
+    r"(~)?(?:/(?:[^/\x00-\x1f:'\\\") ]| (?=[^/\x00-\x1f:'\\\") ]*/))+)+"
 )
 
 # Extensões suportadas — fonte única da verdade (converters importam daqui)
@@ -42,6 +42,25 @@ EXTENSOES_PLANILHA: frozenset[str] = frozenset({".xlsx", ".csv"})
 EXTENSOES_PERMITIDAS: frozenset[str] = (
     EXTENSOES_PDF | EXTENSOES_IMAGEM | EXTENSOES_DOC | EXTENSOES_PPTX | EXTENSOES_PLANILHA
 )
+
+
+# ── Helpers de validação reutilizáveis (DRY — usados por todos conversores) ──
+
+def _validar_existencia(path: Path) -> None:
+    """Levanta FileNotFoundError com mensagem sanitizada se path não existe."""
+    if not path.exists():
+        raise FileNotFoundError(f"Arquivo não encontrado: {path.name}")
+
+
+def _validar_extensao(path: Path, permitidas: frozenset[str]) -> None:
+    """Levanta ValueError se a extensão de path não está no conjunto permitido."""
+    if path.suffix.lower() not in permitidas:
+        raise ValueError(f"Extensão não suportada: {path.suffix}")
+
+
+def _sanitizar_celula_md(text: str) -> str:
+    """Normaliza texto de célula para Markdown seguro (pipe escaping)."""
+    return text.strip().replace("\n", " ").replace("|", "\\|")
 
 
 def validar_path_seguro(path: Path, base_permitida: Path | None = None) -> Path:

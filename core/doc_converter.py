@@ -10,6 +10,8 @@ from pathlib import Path
 
 from core.utils import (  # fonte única da verdade (re-exportado)
     EXTENSOES_DOC,
+    _validar_existencia,
+    _validar_extensao,
     sanitizar_mensagem_erro,
 )
 
@@ -34,12 +36,10 @@ def doc_to_md(path: Path) -> str:
         ValueError: Se extensão não está em EXTENSOES_DOC.
         RuntimeError: Se conversão falha (arquivo corrompido, textutil ausente, etc).
     """
-    if not path.exists():
-        raise FileNotFoundError(f"Arquivo não encontrado: {path.name}")
+    _validar_existencia(path)
 
     sufixo = path.suffix.lower()
-    if sufixo not in EXTENSOES_DOC:
-        raise ValueError(f"Extensão não suportada: {path.suffix}")
+    _validar_extensao(path, EXTENSOES_DOC)
 
     if sufixo == ".docx":
         return _docx_para_md(path)

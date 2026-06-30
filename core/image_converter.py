@@ -9,7 +9,7 @@ from pathlib import Path
 from PIL import Image
 from pillow_heif import register_heif_opener
 
-from core.utils import EXTENSOES_IMAGEM  # fonte única
+from core.utils import EXTENSOES_IMAGEM, _validar_existencia, _validar_extensao  # fonte única
 
 register_heif_opener()
 
@@ -20,6 +20,10 @@ _TESSERACT_PATHS_MACOS = [
     "/usr/local/bin/tesseract",      # Homebrew Intel
     "/usr/bin/tesseract",            # instalação manual
 ]
+
+# Largura mínima para não redimensionar — imagens menores passam por
+# upscale 2x para melhorar a qualidade do OCR.
+_MIN_LARGURA_OCR = 1000
 
 
 @lru_cache(maxsize=1)
@@ -86,11 +90,8 @@ def image_to_md(path: Path) -> str:
         ValueError: Se extensão não está em EXTENSOES_IMAGEM.
         RuntimeError: Se Tesseract não está instalado.
     """
-    if not path.exists():
-        raise FileNotFoundError(f"Arquivo não encontrado: {path.name}")
-
-    if path.suffix.lower() not in EXTENSOES_IMAGEM:
-        raise ValueError(f"Extensão não suportada: {path.suffix}")
+    _validar_existencia(path)
+    _validar_extensao(path, EXTENSOES_IMAGEM)
 
     if not verificar_tesseract():
         raise RuntimeError(
@@ -107,7 +108,7 @@ def image_to_md(path: Path) -> str:
 
             # Redimensiona se largura < 1000px
             largura, altura = img_cinza.size
-            if largura < 1000:
+            if largura < _MIN_LARGURA_OCR:
                 img_cinza = img_cinza.resize(
                     (largura * 2, altura * 2), Image.Resampling.LANCZOS
                 )

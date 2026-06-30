@@ -11,6 +11,11 @@ obsoleto desde Excel 2007. Usuários devem converter para .xlsx primeiro.
 import csv
 from pathlib import Path
 
+from core.utils import _sanitizar_celula_md, _validar_existencia
+
+# Encodings tentados em cascade para CSV — latin-1 nunca falha (mapeia 256 bytes).
+_CSV_ENCODINGS = ("utf-8-sig", "utf-8", "cp1252", "latin-1")
+
 
 def planilha_to_md(path: Path) -> str:
     """
@@ -28,8 +33,7 @@ def planilha_to_md(path: Path) -> str:
         FileNotFoundError: Se path não existe.
         ValueError: Se extensão não é suportada.
     """
-    if not path.exists():
-        raise FileNotFoundError(f"Arquivo não encontrado: {path.name}")
+    _validar_existencia(path)
 
     sufixo = path.suffix.lower()
     if sufixo == ".xlsx":
@@ -63,7 +67,6 @@ def _xlsx_para_md(path: Path) -> str:
 
             partes.append(f"## {sheet_name}")
 
-            # Linha de headers
             headers = [_celula_str(c) for c in rows[0]]
             if not any(headers):
                 continue
@@ -71,10 +74,8 @@ def _xlsx_para_md(path: Path) -> str:
             partes.append("| " + " | ".join(headers) + " |")
             partes.append("| " + " | ".join(["---"] * len(headers)) + " |")
 
-            # Linhas de dados
             for row in rows[1:]:
                 celulas = [_celula_str(c) for c in row]
-                # Pula linhas completamente vazias
                 if any(celulas):
                     partes.append("| " + " | ".join(celulas) + " |")
     finally:
@@ -84,15 +85,14 @@ def _xlsx_para_md(path: Path) -> str:
 
 
 def _csv_para_md(path: Path) -> str:
-    """Converte .csv em Markdown usando stdlib csv."""
-    # utf-8-sig lida com BOM do Excel (arquivos exportados do Windows)
-    # Cascata de decode: latin-1 nunca falha (mapeia 256 bytes) — garante
-    # que qualquer arquivo é lido, mesmo com encoding exótico.
+    """Converte .csv em Markdown usando stdlib csv. Lê bytes uma vez, decode in-memory."""
+    dados = path.read_bytes()
+
     rows = None
-    for enc in ("utf-8-sig", "utf-8", "cp1252", "latin-1"):
+    for enc in _CSV_ENCODINGS:
         try:
-            with open(path, newline="", encoding=enc) as f:
-                rows = list(csv.reader(f))
+            texto = dados.decode(enc)
+            rows = list(csv.reader(texto.splitlines()))
             break
         except UnicodeDecodeError:
             continue
@@ -116,5 +116,4 @@ def _celula_str(valor) -> str:
     """Normaliza valor de célula para string Markdown segura."""
     if valor is None:
         return ""
-    # Pipe dentro de célula quebraria a tabela MD
-    return str(valor).strip().replace("\n", " ").replace("|", "\\|")
+    return _sanitizar_celula_md(str(valor))

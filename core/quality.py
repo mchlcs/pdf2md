@@ -25,10 +25,8 @@ Motivo: o mojibake de "í" contém U+00AD (soft hyphen) como segundo byte.
 Se limpar_artefatos rodar primeiro, o padrão "Ã\xad" vira "Ã" e a correção
 de mojibake não consegue mais detectar.
 """
+import re
 from pathlib import Path
-
-from core.llm_enhancer import disponivel as llm_disponivel
-from core.llm_enhancer import melhorar_markdown
 
 # ── Tabela de mojibake PT-BR (gerada programaticamente) ─────────────────────
 # Mojibake ocorre quando texto Latin-1/cp1252 é decodificado como UTF-8.
@@ -56,6 +54,15 @@ _MOJIBAKE: list[tuple[str, str]] = _build_mojibake_table(_PT_BR_CHARS)
 
 # Strings de detecção rápida (só os padrões errados)
 _MOJIBAKE_DETECTORES: list[str] = [errado for errado, _ in _MOJIBAKE]
+
+# Regex compilado para detecção de mojibake em uma única passada
+# (antes: 24 chamadas de str.count, agora 1 chamada de re.findall)
+_MOJIBAKE_RE = re.compile("|".join(re.escape(p) for p in _MOJIBAKE_DETECTORES))
+
+# Thresholds de validação (magic numbers nomeados)
+_MIN_KB_AVISO_CURTO = 10
+_MIN_CHARS_AVISO_CURTO = 100
+_MAX_SOFT_HYPHENS = 5
 
 
 # ── 1a. Correção de mojibake (deve rodar ANTES de limpar_artefatos) ──────────
@@ -151,8 +158,8 @@ def validar_qualidade(md: str, origem: Path) -> list[str]:
     if not md.strip():
         return []  # output vazio é ERRO, não aviso de qualidade
 
-    # 1. Mojibake residual
-    n_mojibake = sum(md.count(p) for p in _MOJIBAKE_DETECTORES)
+    # 1. Mojibake residual — regex compilado (1 passada vs 24 str.count)
+    n_mojibake = len(_MOJIBAKE_RE.findall(md))
     if n_mojibake > 0:
         avisos.append(
             f"Encoding possivelmente corrompido — {n_mojibake} padrão(s) de "
@@ -171,7 +178,7 @@ def validar_qualidade(md: str, origem: Path) -> list[str]:
     try:
         tamanho_kb = origem.stat().st_size / 1024
         chars_util = len(md.strip())
-        if tamanho_kb > 10 and chars_util < 100:
+        if tamanho_kb > _MIN_KB_AVISO_CURTO and chars_util < _MIN_CHARS_AVISO_CURTO:
             avisos.append(
                 f"Output muito curto ({chars_util} chars) para arquivo de "
                 f"{tamanho_kb:.0f} KB — possível falha na extração de texto"
@@ -181,7 +188,7 @@ def validar_qualidade(md: str, origem: Path) -> list[str]:
 
     # 4. Hifens suaves residuais acima de threshold
     n_soft_hyphen = md.count("\u00ad")
-    if n_soft_hyphen > 5:
+    if n_soft_hyphen > _MAX_SOFT_HYPHENS:
         avisos.append(
             f"{n_soft_hyphen} hifens suaves (U+00AD) residuais — palavras podem "
             f"aparecer quebradas em alguns renderizadores (Obsidian, browsers)"
@@ -221,6 +228,10 @@ def aplicar_pipeline_qualidade(
     avisos = validar_qualidade(md, origem)
 
     if usar_llm or (llm_fallback and avisos):
+        # Lazy import — reduz acoplamento: quality não depende de llm_enhancer no import-time
+        from core.llm_enhancer import disponivel as llm_disponivel
+        from core.llm_enhancer import melhorar_markdown
+
         if llm_disponivel():
             md, avisos_llm = melhorar_markdown(md, origem)
             avisos = validar_qualidade(md, origem) + avisos_llm
