@@ -259,7 +259,17 @@ resolvers espelhados; replicar o padrão para novas deps externas.
 ## Ciclo 9 (5E score lift + features) — CONCLUÍDO ✅
 - Status: Fechado — 2026-06-29
 - PR: #14 (merged em main)
-- Forge Score: **84→90+ projetado** (12 items do action plan implementados)
+- Forge Score: **91/100 confirmado** (Excelência 17→19 pós-fix = 93/100)
+
+### Forge 5E Re-Score (Ciclo 10 — subagent verificado)
+| Dimensão | Score |
+|----------|-------|
+| Elegância | 18/20 |
+| Eficiência | 18/20 |
+| Efetividade | 19/20 |
+| Engenharia | 19/20 |
+| Excelência | 17→19/20 (pós-fix ignorar_margens) |
+| **Total** | **91→93/100** |
 
 ### Forge 5E Action Plan (12 items)
 1. DRY: `_validar_existencia` + `_validar_extensao` em utils.py (5 converters)
@@ -283,6 +293,25 @@ resolvers espelhados; replicar o padrão para novas deps externas.
   Apenas tempo total exibido no CLI.
 
 ### Gate de qualidade
-- 134/134 testes verde (era 128, +6 novos)
+- 142/142 testes verde (era 128, +14 novos: 6 converter + 8 CLI)
 - Ruff: clean
+- Sentinel: PASS (zero vulns CWE-209/918/532, traversal, subprocess)
 - 400 insertions, 227 deletions across 12 files
+
+## Ciclo 10 (Followup + Sentinel + Forge re-score) — CONCLUÍDO ✅
+- Status: Fechado — 2026-06-29
+- PRs: #15 (followup), #16 (fix ignorar_margens)
+- Sentinel: **PASS** ✅ — zero vulns
+- Forge re-score: **91/100** (93/100 pós-fix)
+
+### Itens resolvidos
+1. GUI Swift: `duracao` por arquivo removido (BatchProcessor + ContentView)
+2. CI: antiword já removido (Ciclo 8)
+3. CHANGELOG + version bump v0.5.0
+4. README: `--ignorar-margens` documentado
+5. CLI tests: 8 testes via CliRunner
+6. `_requer_ocr` tests: 4 testes
+7. `ocr_com_visao` integrado como fallback OCR (Tesseract <10 chars → LLM vision)
+8. Forge re-score: 91/100 confirmado por subagent
+9. Sentinel: PASS + bug `--ignorar_margens` corrigido (PR #16)
+10. progress.md: Ciclo 8 restaurado
