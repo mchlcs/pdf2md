@@ -9,19 +9,17 @@ struct ProgressoArquivo: Identifiable, Codable {
     let id: String       // path do arquivo origem
     let status: String   // "aguardando" | "processando" | "concluido" | "erro" | "cancelado" | "ignorado"
     let erro: String?
-    let duracao: Double? // segundos da conversão (vem do JSON do core); nil até concluir
     let avisos: [String] // avisos de qualidade; [] = output limpo
 
     // Decoder customizado: aceita JSON sem "avisos" (versões anteriores do binário)
     private enum CodingKeys: String, CodingKey {
-        case id, status, erro, duracao, avisos
+        case id, status, erro, avisos
     }
 
-    init(id: String, status: String, erro: String?, duracao: Double? = nil, avisos: [String] = []) {
+    init(id: String, status: String, erro: String?, avisos: [String] = []) {
         self.id = id
         self.status = status
         self.erro = erro
-        self.duracao = duracao
         self.avisos = avisos
     }
 
@@ -30,7 +28,6 @@ struct ProgressoArquivo: Identifiable, Codable {
         id = try c.decode(String.self, forKey: .id)
         status = try c.decode(String.self, forKey: .status)
         erro = try c.decodeIfPresent(String.self, forKey: .erro)
-        duracao = try c.decodeIfPresent(Double.self, forKey: .duracao)
         avisos = (try? c.decode([String].self, forKey: .avisos)) ?? []
     }
 }
@@ -84,7 +81,6 @@ class BatchProcessor: ObservableObject {
                     id: url.path,
                     status: "erro",
                     erro: "Path fora do diretório home",
-                    duracao: nil
                 )
                 progresso.append(rejeitado)
                 return nil
@@ -94,7 +90,7 @@ class BatchProcessor: ObservableObject {
 
         // Inicializa progresso apenas para arquivos válidos
         let progressoInicial = arquivosValidos.map {
-            ProgressoArquivo(id: $0.path, status: "aguardando", erro: nil, duracao: nil)
+            ProgressoArquivo(id: $0.path, status: "aguardando", erro: nil)
         }
         progresso.append(contentsOf: progressoInicial)
 
@@ -177,7 +173,7 @@ class BatchProcessor: ObservableObject {
                     for linha in string.split(separator: "\n") {
                         if let jsonData = String(linha).data(using: .utf8),
                            let item = try? JSONDecoder().decode(ProgressoArquivo.self, from: jsonData) {
-                            atualizarProgresso(id: item.id, status: item.status, erro: item.erro, duracao: item.duracao)
+                            atualizarProgresso(id: item.id, status: item.status, erro: item.erro)
                         }
                     }
                 }
@@ -207,9 +203,9 @@ class BatchProcessor: ObservableObject {
         }
     }
 
-    private func atualizarProgresso(id: String, status: String, erro: String?, duracao: Double? = nil) {
+    private func atualizarProgresso(id: String, status: String, erro: String?) {
         if let index = progresso.firstIndex(where: { $0.id == id }) {
-            progresso[index] = ProgressoArquivo(id: id, status: status, erro: erro, duracao: duracao)
+            progresso[index] = ProgressoArquivo(id: id, status: status, erro: erro)
         }
     }
 
@@ -242,7 +238,7 @@ class BatchProcessor: ObservableObject {
     }
 
     /// Formata segundos legível: "1.2s" (<1min) ou "1m02s" (>=1min).
-    /// Estático para reuso no ContentView (tempo por-arquivo e total).
+    /// Estático para reuso no ContentView (tempo total da conversão).
     static func formatarDuracao(_ seg: Double) -> String {
         if seg < 1 {
             return String(format: "%.0fms", seg * 1000)  // ms: conversão leva ms, não "0.0s"

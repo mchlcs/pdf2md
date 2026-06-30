@@ -3,6 +3,32 @@
 Based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [SemVer](https://semver.org/).
 
+## [0.5.0] — 2026-06-29
+
+### Added
+
+- **`--ignorar-margens N`**: Removes page headers and footers from PDF output.
+  Filters text blocks by vertical bbox position — N% of page height ignored
+  from top and bottom. Default: 0 (disabled).
+  Example: `pdf2md doc.pdf output/ --ignorar-margens 5`
+
+### Removed
+
+- **Per-file duration tracking**: `ResultadoArquivo.duracao` field removed.
+  Only total conversion time is displayed in CLI output. The JSON output
+  no longer includes the `duracao` field per file. GUI Swift updated to
+  remove per-file time display.
+
+### Changed
+
+- **Forge 5E score lift (84→90+ projected)**: 12-item action plan implemented:
+  - DRY: `_validar_existencia`, `_validar_extensao`, `_sanitizar_celula_md` in utils.py
+  - Split: `pdf_to_md`, `_processar_arquivo`, `batch_convert`, `pptx_to_md` into sub-functions <20 lines
+  - Magic numbers named: `_MIN_TEXTO_PAGINA`, `_OCR_DPI`, `_MAX_CHARS_LLM`, `_MIN_LARGURA_OCR`, etc.
+  - Eficiência: compiled regex for mojibake detection (1 pass vs 24 `str.count`)
+  - Eficiência: `_csv_para_md` reads bytes once, decodes in-memory (1 I/O vs 4)
+  - Efetividade: lazy import `llm_enhancer` in `aplicar_pipeline_qualidade` (reduces coupling)
+
 ## [0.4.2] — 2026-06-29
 
 ### Security
