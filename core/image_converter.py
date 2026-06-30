@@ -118,4 +118,17 @@ def image_to_md(path: Path) -> str:
     except Exception as exc:
         raise RuntimeError("Falha no processamento da imagem — verifique se o arquivo está corrompido") from exc
 
-    return texto.strip()
+    texto = texto.strip()
+
+    # Fallback: se Tesseract retornou texto muito curto e LLM com visão está disponível,
+    # tenta OCR via LLM (útil para fontes incomuns, manuscrito, etc.)
+    if len(texto) < 10:
+        from core.llm_enhancer import disponivel as llm_disponivel
+        from core.llm_enhancer import ocr_com_visao
+
+        if llm_disponivel():
+            texto_llm, _ = ocr_com_visao(path)
+            if texto_llm and len(texto_llm) > len(texto):
+                return texto_llm
+
+    return texto

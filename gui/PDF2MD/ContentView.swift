@@ -214,15 +214,10 @@ struct ContentView: View {
                                 .foregroundColor(.red)
                                 .lineLimit(1)
                         } else if let aviso = prog.avisos.first {
-                            // Primeiro aviso — mais relevante que o tempo
                             Text("⚠ \(aviso)")
                                 .font(.caption2)
                                 .foregroundColor(.orange)
                                 .lineLimit(1)
-                        } else if let d = prog.duracao, d > 0 {
-                            Text(BatchProcessor.formatarDuracao(d))
-                                .font(.caption.monospacedDigit())
-                                .foregroundColor(.secondary)
                         }
                     }
                 }

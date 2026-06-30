@@ -97,6 +97,9 @@ pdf2md scanned.pdf output/ --llm-fallback
 
 # LLM always (regardless of quality)
 pdf2md docs/ output/ --llm
+
+# Ignore page headers and footers (5% of page height from top and bottom)
+pdf2md document.pdf output/ --ignorar-margens 5
 ```
 
 ### LLM configuration

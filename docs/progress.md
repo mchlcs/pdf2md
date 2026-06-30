@@ -239,6 +239,23 @@ resolvers espelhados; replicar o padrão para novas deps externas.
 - Merge `security/ssrf-credleak-pathleak-fixes` → `main` (via PR, CI verde)
 - `infra-cloud`: criar tag `v0.4.0` + reconciliar GitHub Release (atualmente ausente)
 
+## Ciclo 8 (Code review + DRY + Finding #5 fix) — CONCLUÍDO ✅
+- Status: Fechado — 2026-06-29
+- Branch: `security/ssrf-credleak-pathleak-fixes` (squashed via PR #12 + extendida)
+- Trigger: usuário pediu análise via fullstack-agent-system (Maestro → Stratum + Sentinel)
+
+### Melhorias implementadas
+1. **Finding #5 fix (CWE-209)**: `sanitizar_mensagem_erro` redige `/Users/<username>` → `[user]`
+2. **DRY: extensões consolidadas** em `utils.py` (single source of truth)
+3. **Dead code removido**: `for/else` em `_csv_para_md`, `_decodificar_textutil` cascade, `validar_extensao`
+4. **Unicode escapes** em `quality.py` (diff-safe)
+5. **README + LICENSE + SECURITY.md**: URLs `mchlcs` → `phant0um`, antiword → textutil
+6. **Forge Score: 79/100** (Ciclo 7 baseline)
+
+### Gate de qualidade
+- 126/126 testes verde
+- Ruff: clean
+
 ## Ciclo 9 (5E score lift + features) — CONCLUÍDO ✅
 - Status: Fechado — 2026-06-29
 - PR: #14 (merged em main)
