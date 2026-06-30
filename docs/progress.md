@@ -239,31 +239,33 @@ resolvers espelhados; replicar o padrão para novas deps externas.
 - Merge `security/ssrf-credleak-pathleak-fixes` → `main` (via PR, CI verde)
 - `infra-cloud`: criar tag `v0.4.0` + reconciliar GitHub Release (atualmente ausente)
 
-## Ciclo 8 (Code review + DRY + Finding #5 fix) — CONCLUÍDO ✅
+## Ciclo 9 (5E score lift + features) — CONCLUÍDO ✅
 - Status: Fechado — 2026-06-29
-- Branch: `security/ssrf-credleak-pathleak-fixes` (mesma branch, extendida)
-- Trigger: usuário pediu análise via fullstack-agent-system (Maestro → Stratum + Sentinel)
+- PR: #14 (merged em main)
+- Forge Score: **84→90+ projetado** (12 items do action plan implementados)
 
-### Análise (Maestro orchestration)
-- Stratum (backend code review): revisão 5E em andamento
-- Sentinel (security review): revisão em andamento
-- GitHub remote corrigido: `mchlcs/pdf2md` → `phant0um/pdf2md`
+### Forge 5E Action Plan (12 items)
+1. DRY: `_validar_existencia` + `_validar_extensao` em utils.py (5 converters)
+2. DRY: `_sanitizar_celula_md` (pipe escaping — pptx + xlsx)
+3. Split `pdf_to_md` → 5 sub-funções <20 linhas cada
+4. Split `_processar_arquivo` → `_converter_arquivo` + `_resultado_ignorado` + `_resultado_erro`
+5. Split `batch_convert` → `_coletar_arquivos` + `_preparar_tarefas` + `_executar_paralelo`
+6. Split `pptx_to_md` → extrai `_processar_shape`
+7. Magic numbers nomeados: `_MIN_TEXTO_PAGINA`, `_OCR_DPI`, `_MAX_CHARS_LLM`, `_MIN_LARGURA_OCR`, `_MIN_KB_AVISO_CURTO`, `_MAX_SOFT_HYPHENS`, etc.
+8. Lazy import `llm_enhancer` em `aplicar_pipeline_qualidade` (reduz acoplamento)
+9. Compiled regex para mojibake detection (1 passada vs 24 str.count)
+10. `_csv_para_md` lê bytes uma vez, decode in-memory (1 I/O vs 4)
+11. Tests para `validar_path_seguro` (3 casos)
+12. Tests para funções extraídas (4 casos)
 
-### Melhorias implementadas
-1. **Finding #5 fix (CWE-209)**: `sanitizar_mensagem_erro` agora redige
-   `/Users/<username>` (2 segmentos) para `[user]` em vez de expor o username.
-   Caso com espaço (`/Users/John Doe`) coberto por segunda passada regex.
-   +2 testes regressão.
-2. **DRY: extensões consolidadas**: `EXTENSOES_IMAGEM`, `EXTENSOES_PPTX`,
-   `EXTENSOES_PLANILHA` agora vivem só em `utils.py`. Converters importam
-   de lá (antes redefiniam frozensets duplicados).
-3. **Dead code removido**: `for/else` branch em `_csv_para_md` — `latin-1`
-   nunca falha, então `else: raise RuntimeError` era inalcançável.
-4. **README corrigido**: URLs `mchlcs` → `phant0um`, antiword → textutil
-   na tabela de formatos e stack.
-5. **CHANGELOG + version bump**: v0.4.2 com todas as mudanças documentadas.
+### Features
+- **`--ignorar-margens N`**: Remove cabeçalho e rodapé de páginas PDF.
+  Filtra blocos de texto por posição vertical (bbox). N% da altura ignorado
+  do topo e rodapé. Default: 0 (desativado).
+- **Remove tempo por-arquivo**: `ResultadoArquivo.duracao` removido.
+  Apenas tempo total exibido no CLI.
 
 ### Gate de qualidade
-- 126/126 testes verde (era 124, +2 regressão Finding #5)
+- 134/134 testes verde (era 128, +6 novos)
 - Ruff: clean
-- Zero paths hardcoded, zero subprocess sem validação
+- 400 insertions, 227 deletions across 12 files
