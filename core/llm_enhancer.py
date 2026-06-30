@@ -39,6 +39,9 @@ from urllib.parse import urlsplit
 _URL_PADRAO = "http://localhost:11434/v1"
 _MODELO_PADRAO = "llama3.2-vision"
 _TIMEOUT_PADRAO = 120
+_MAX_CHARS_LLM = 12000       # ~3k tokens — evita estourar contexto do modelo
+_MAX_TOKENS_RESPOSTA = 4096
+_TIMEOUT_VERIFICACAO = 2     # segundos — timeout rápido para checagem de disponibilidade
 
 # Schemes aceitos para a URL do LLM — bloqueia file://, ftp://, gopher:// etc.
 # que permitiriam SSRF/leitura arbitrária de arquivo via urlopen (CWE-918).
@@ -119,7 +122,7 @@ def _completar(mensagens: list[dict]) -> str:
     payload = json.dumps({
         "model": _modelo(),
         "messages": mensagens,
-        "max_tokens": 4096,
+        "max_tokens": _MAX_TOKENS_RESPOSTA,
         "temperature": 0.1,
     }).encode("utf-8")
 
@@ -163,7 +166,7 @@ def disponivel() -> bool:
         return False
     try:
         req = urllib.request.Request(f"{url}/models", method="GET")
-        with urllib.request.urlopen(req, timeout=2):
+        with urllib.request.urlopen(req, timeout=_TIMEOUT_VERIFICACAO):
             return True
     except Exception:
         return False
@@ -187,14 +190,13 @@ def melhorar_markdown(md: str, origem: Path) -> tuple[str, list[str]]:
         (md_melhorado, avisos_adicionais) — avisos_adicionais é [] se OK.
     """
     # Trunca para não estourar o contexto (12k chars ≈ ~3k tokens)
-    md_input = md[:12000]
+    md_input = md[:_MAX_CHARS_LLM]
     prompt = _PROMPT_MELHORIA.format(nome=origem.name, md=md_input)
 
     try:
         resultado = _completar([{"role": "user", "content": prompt}])
-        # Junta com o restante não enviado ao LLM (documentos grandes)
-        if len(md) > 12000:
-            resultado = resultado + "\n\n" + md[12000:]
+        if len(md) > _MAX_CHARS_LLM:
+            resultado = resultado + "\n\n" + md[_MAX_CHARS_LLM:]
         return resultado, []
     except Exception as exc:
         # Não inclui str(exc) no aviso — pode conter URL, credencial ou path

@@ -40,12 +40,11 @@ def _emitir_json(
     id_: str,
     status: str,
     erro: str | None,
-    duracao: float = 0.0,
     avisos: list[str] | None = None,
 ) -> None:
     """Emite linha JSON no stdout para consumo pelo Swift bridge."""
     linha = json.dumps(
-        {"id": id_, "status": status, "erro": erro, "duracao": duracao, "avisos": avisos or []},
+        {"id": id_, "status": status, "erro": erro, "avisos": avisos or []},
         ensure_ascii=False,
     )
     sys.stdout.write(linha + "\n")
@@ -121,6 +120,11 @@ def converter(
              "Mais lento que --llm-fallback.",
     ),
     json_output: bool = typer.Option(False, "--json", hidden=True, help="Output em JSON por linha"),
+    ignorar_margens: float = typer.Option(
+        0.0, "--ignorar-margens",
+        help="Ignora cabeçalho e rodapé de páginas PDF (percentual da altura). "
+             "Ex: 5 ignora 5% do topo e 5% do rodapé. Padrão: 0 (desativado).",
+    ),
 ) -> None:
     """
     Converte PDFs e imagens em Markdown.
@@ -180,6 +184,7 @@ def converter(
                     obsidian=obsidian,
                     usar_llm=usar_llm,
                     llm_fallback=llm_fallback,
+                    ignorar_margens=ignorar_margens,
                 )
             progress.update(task, total=len(resultados), completed=len(resultados))
     except (FileNotFoundError, NotADirectoryError) as exc:
@@ -194,7 +199,6 @@ def converter(
                 str(res.origem),
                 res.status.value,
                 res.erro,
-                res.duracao,
                 res.avisos,
             )
     else:
@@ -203,7 +207,6 @@ def converter(
         table.add_column("Origem", style="cyan")
         table.add_column("Status", style="green")
         table.add_column("Destino", style="magenta")
-        table.add_column("Tempo", style="blue", justify="right")
         table.add_column("Erro/Aviso", style="red")
 
         for res in resultados:
@@ -227,7 +230,6 @@ def converter(
                 res.origem.name,
                 f"[{status_color}]{status_label}[/{status_color}]",
                 res.destino.name if res.destino else "—",
-                _fmt_duracao(res.duracao) if res.duracao > 0 else "—",
                 nota,
             )
 

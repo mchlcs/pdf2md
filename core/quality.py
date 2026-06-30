@@ -25,6 +25,7 @@ Motivo: o mojibake de "í" contém U+00AD (soft hyphen) como segundo byte.
 Se limpar_artefatos rodar primeiro, o padrão "Ã\xad" vira "Ã" e a correção
 de mojibake não consegue mais detectar.
 """
+import re
 from pathlib import Path
 
 # ── Tabela de mojibake PT-BR (gerada programaticamente) ─────────────────────
@@ -53,6 +54,15 @@ _MOJIBAKE: list[tuple[str, str]] = _build_mojibake_table(_PT_BR_CHARS)
 
 # Strings de detecção rápida (só os padrões errados)
 _MOJIBAKE_DETECTORES: list[str] = [errado for errado, _ in _MOJIBAKE]
+
+# Regex compilado para detecção de mojibake em uma única passada
+# (antes: 24 chamadas de str.count, agora 1 chamada de re.findall)
+_MOJIBAKE_RE = re.compile("|".join(re.escape(p) for p in _MOJIBAKE_DETECTORES))
+
+# Thresholds de validação (magic numbers nomeados)
+_MIN_KB_AVISO_CURTO = 10
+_MIN_CHARS_AVISO_CURTO = 100
+_MAX_SOFT_HYPHENS = 5
 
 
 # ── 1a. Correção de mojibake (deve rodar ANTES de limpar_artefatos) ──────────
@@ -107,12 +117,12 @@ def limpar_artefatos(texto: str) -> str:
     Returns:
         String limpa. Nunca modifica conteúdo semântico real.
     """
-    texto = texto.replace("­", "")  # SOFT HYPHEN
-    texto = texto.replace("​", "")  # ZERO WIDTH SPACE
-    texto = texto.replace("‌", "")  # ZERO WIDTH NON-JOINER
-    texto = texto.replace("‍", "")  # ZERO WIDTH JOINER
-    texto = texto.replace("﻿", "")  # BOM mid-string
-    texto = texto.replace(" ", " ") # NO-BREAK SPACE → espaço normal
+    texto = texto.replace("\u00ad", "")   # SOFT HYPHEN
+    texto = texto.replace("\u200b", "")   # ZERO WIDTH SPACE
+    texto = texto.replace("\u200c", "")   # ZERO WIDTH NON-JOINER
+    texto = texto.replace("\u200d", "")   # ZERO WIDTH JOINER
+    texto = texto.replace("\ufeff", "")  # BOM mid-string
+    texto = texto.replace("\u00a0", " ") # NO-BREAK SPACE → espaço normal
 
     # Colapsa linhas que ficaram só com whitespace (preserva estrutura de parágrafos)
     linhas = [linha if linha.strip() else "" for linha in texto.split("\n")]
@@ -148,8 +158,8 @@ def validar_qualidade(md: str, origem: Path) -> list[str]:
     if not md.strip():
         return []  # output vazio é ERRO, não aviso de qualidade
 
-    # 1. Mojibake residual
-    n_mojibake = sum(md.count(p) for p in _MOJIBAKE_DETECTORES)
+    # 1. Mojibake residual — regex compilado (1 passada vs 24 str.count)
+    n_mojibake = len(_MOJIBAKE_RE.findall(md))
     if n_mojibake > 0:
         avisos.append(
             f"Encoding possivelmente corrompido — {n_mojibake} padrão(s) de "
@@ -157,7 +167,7 @@ def validar_qualidade(md: str, origem: Path) -> list[str]:
         )
 
     # 2. Chars de substituição U+FFFD
-    n_fffd = md.count("�")
+    n_fffd = md.count("\ufffd")
     if n_fffd > 0:
         avisos.append(
             f"{n_fffd} caractere(s) de substituição (U+FFFD) detectado(s) — "
@@ -168,7 +178,7 @@ def validar_qualidade(md: str, origem: Path) -> list[str]:
     try:
         tamanho_kb = origem.stat().st_size / 1024
         chars_util = len(md.strip())
-        if tamanho_kb > 10 and chars_util < 100:
+        if tamanho_kb > _MIN_KB_AVISO_CURTO and chars_util < _MIN_CHARS_AVISO_CURTO:
             avisos.append(
                 f"Output muito curto ({chars_util} chars) para arquivo de "
                 f"{tamanho_kb:.0f} KB — possível falha na extração de texto"
@@ -177,11 +187,57 @@ def validar_qualidade(md: str, origem: Path) -> list[str]:
         pass
 
     # 4. Hifens suaves residuais acima de threshold
-    n_soft_hyphen = md.count("­")
-    if n_soft_hyphen > 5:
+    n_soft_hyphen = md.count("\u00ad")
+    if n_soft_hyphen > _MAX_SOFT_HYPHENS:
         avisos.append(
             f"{n_soft_hyphen} hifens suaves (U+00AD) residuais — palavras podem "
             f"aparecer quebradas em alguns renderizadores (Obsidian, browsers)"
         )
 
     return avisos
+
+
+# ── 3. Orquestração do pipeline completo ──────────────────────────────────────
+
+def aplicar_pipeline_qualidade(
+    md: str,
+    origem: Path,
+    usar_llm: bool = False,
+    llm_fallback: bool = False,
+) -> tuple[str, list[str]]:
+    """
+    Aplica o pipeline completo de qualidade ao Markdown extraído.
+
+    Ordem obrigatória (ver docstring do módulo):
+    1. corrigir_mojibake — antes de limpar_artefatos
+    2. limpar_artefatos — remove soft hyphens etc.
+    3. validar_qualidade — detecta problemas residuais → avisos
+    4. LLM enhancement (opcional) — melhora qualidade via LLM
+
+    Args:
+        md: Markdown bruto extraído pelo conversor.
+        origem: Path do arquivo de origem (para contexto no LLM e validar_qualidade).
+        usar_llm: Se True, sempre aplica LLM (--llm).
+        llm_fallback: Se True, aplica LLM só quando há avisos (--llm-fallback).
+
+    Returns:
+        (md_tratado, avisos) — avisos é lista vazia se qualidade OK.
+    """
+    md, _ = corrigir_mojibake(md)
+    md = limpar_artefatos(md)
+    avisos = validar_qualidade(md, origem)
+
+    if usar_llm or (llm_fallback and avisos):
+        # Lazy import — reduz acoplamento: quality não depende de llm_enhancer no import-time
+        from core.llm_enhancer import disponivel as llm_disponivel
+        from core.llm_enhancer import melhorar_markdown
+
+        if llm_disponivel():
+            md, avisos_llm = melhorar_markdown(md, origem)
+            avisos = validar_qualidade(md, origem) + avisos_llm
+        elif usar_llm:
+            avisos.append(
+                "LLM não disponível — verifique PDF2MD_LLM_URL e se Ollama está rodando"
+            )
+
+    return md, avisos

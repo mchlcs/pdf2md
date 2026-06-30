@@ -10,6 +10,8 @@ from pathlib import Path
 
 from core.utils import (  # fonte única da verdade (re-exportado)
     EXTENSOES_DOC,
+    _validar_existencia,
+    _validar_extensao,
     sanitizar_mensagem_erro,
 )
 
@@ -34,12 +36,10 @@ def doc_to_md(path: Path) -> str:
         ValueError: Se extensão não está em EXTENSOES_DOC.
         RuntimeError: Se conversão falha (arquivo corrompido, textutil ausente, etc).
     """
-    if not path.exists():
-        raise FileNotFoundError(f"Arquivo não encontrado: {path.name}")
+    _validar_existencia(path)
 
     sufixo = path.suffix.lower()
-    if sufixo not in EXTENSOES_DOC:
-        raise ValueError(f"Extensão não suportada: {path.suffix}")
+    _validar_extensao(path, EXTENSOES_DOC)
 
     if sufixo == ".docx":
         return _docx_para_md(path)
@@ -66,19 +66,13 @@ def _docx_para_md(path: Path) -> str:
 
 def _decodificar_textutil(dados: bytes) -> str:
     """
-    Decodifica a saída do textutil de forma defensiva.
+    Decodifica a saída do textutil defensivamente.
 
-    textutil já emite UTF-8 nativamente (diferente do antiword, que usava
-    Latin-1), mas mantemos uma cascata de decode como rede de segurança caso
-    o .doc de origem contenha bytes em outro encoding que o textutil repasse
-    sem reconverter. Tenta UTF-8, depois CP1252, e por fim Latin-1 (que nunca
-    falha: mapeia os 256 bytes). 'replace' é só o fallback final.
+    textutil emite UTF-8 nativamente (diferente do antiword que usava
+    Latin-1), mas mantemos errors='replace' como rede de segurança caso
+    o .doc de origem contenha bytes em outro encoding que o textutil
+    repasse sem reconverter.
     """
-    for enc in ("utf-8", "cp1252", "latin-1"):
-        try:
-            return dados.decode(enc)
-        except UnicodeDecodeError:
-            continue
     return dados.decode("utf-8", errors="replace")
 
 

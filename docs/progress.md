@@ -238,3 +238,32 @@ resolvers espelhados; replicar o padrão para novas deps externas.
 ### Pendente (RED — requer confirmação)
 - Merge `security/ssrf-credleak-pathleak-fixes` → `main` (via PR, CI verde)
 - `infra-cloud`: criar tag `v0.4.0` + reconciliar GitHub Release (atualmente ausente)
+
+## Ciclo 8 (Code review + DRY + Finding #5 fix) — CONCLUÍDO ✅
+- Status: Fechado — 2026-06-29
+- Branch: `security/ssrf-credleak-pathleak-fixes` (mesma branch, extendida)
+- Trigger: usuário pediu análise via fullstack-agent-system (Maestro → Stratum + Sentinel)
+
+### Análise (Maestro orchestration)
+- Stratum (backend code review): revisão 5E em andamento
+- Sentinel (security review): revisão em andamento
+- GitHub remote corrigido: `mchlcs/pdf2md` → `phant0um/pdf2md`
+
+### Melhorias implementadas
+1. **Finding #5 fix (CWE-209)**: `sanitizar_mensagem_erro` agora redige
+   `/Users/<username>` (2 segmentos) para `[user]` em vez de expor o username.
+   Caso com espaço (`/Users/John Doe`) coberto por segunda passada regex.
+   +2 testes regressão.
+2. **DRY: extensões consolidadas**: `EXTENSOES_IMAGEM`, `EXTENSOES_PPTX`,
+   `EXTENSOES_PLANILHA` agora vivem só em `utils.py`. Converters importam
+   de lá (antes redefiniam frozensets duplicados).
+3. **Dead code removido**: `for/else` branch em `_csv_para_md` — `latin-1`
+   nunca falha, então `else: raise RuntimeError` era inalcançável.
+4. **README corrigido**: URLs `mchlcs` → `phant0um`, antiword → textutil
+   na tabela de formatos e stack.
+5. **CHANGELOG + version bump**: v0.4.2 com todas as mudanças documentadas.
+
+### Gate de qualidade
+- 126/126 testes verde (era 124, +2 regressão Finding #5)
+- Ruff: clean
+- Zero paths hardcoded, zero subprocess sem validação

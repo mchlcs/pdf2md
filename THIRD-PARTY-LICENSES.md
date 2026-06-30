@@ -10,7 +10,7 @@ satisfaz a atribuição exigida por essas licenças.
 > sob **GNU AGPL-3.0** (ou licença comercial Artifex). Como AGPL é copyleft, a
 > **distribuição do binário** está sujeita aos termos da AGPL para esse
 > componente. O código-fonte correspondente está publicamente disponível em
-> https://github.com/mchlcs/pdf2md (pdf2md) e https://github.com/pymupdf/PyMuPDF
+> https://github.com/phant0um/pdf2md (pdf2md) e https://github.com/pymupdf/PyMuPDF
 > (PyMuPDF), cumprindo a obrigação de disponibilização de fonte.
 
 ---
