@@ -2,11 +2,20 @@
 Testes para core/cli.py — comando converter via CliRunner.
 """
 
+import re
+
 from typer.testing import CliRunner
 
 from core.cli import app
 
 runner = CliRunner()
+
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _sem_ansi(texto: str) -> str:
+    """Remove códigos ANSI do output do Rich para asserções de substring."""
+    return _ANSI_RE.sub("", texto)
 
 
 def test_cli_help():
@@ -20,7 +29,7 @@ def test_cli_converter_ajuda():
     """converter --help mostra opções do comando."""
     result = runner.invoke(app, ["converter", "--help"])
     assert result.exit_code == 0
-    assert "--ignorar-margens" in result.stdout
+    assert "--ignorar-margens" in _sem_ansi(result.stdout)
 
 
 def test_cli_path_traversal_rejeitado(tmp_path):
