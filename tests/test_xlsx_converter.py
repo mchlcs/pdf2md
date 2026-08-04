@@ -172,6 +172,39 @@ def test_csv_extensao_invalida(tmp_path):
         planilha_to_md(f)
 
 
+# ── Integridade do bloco de tabela ──────────────────────────────────────────
+
+def _sem_linha_vazia_em_tabela(md: str) -> bool:
+    """True se nenhuma linha vazia aparece entre duas linhas de tabela."""
+    linhas = md.split("\n")
+    for i in range(1, len(linhas) - 1):
+        if linhas[i].strip():
+            continue
+        if linhas[i - 1].startswith("|") and linhas[i + 1].startswith("|"):
+            return False
+    return True
+
+
+def test_xlsx_tabela_sem_linha_em_branco(xlsx_simples):
+    """Linhas da tabela ficam contíguas — linha vazia quebra GFM/Obsidian."""
+    md = planilha_to_md(xlsx_simples)
+    assert _sem_linha_vazia_em_tabela(md), md
+
+
+def test_xlsx_multi_sheet_tabela_sem_linha_em_branco(xlsx_multi_sheet):
+    """Múltiplas abas: cada bloco íntegro, separação só entre abas."""
+    md = planilha_to_md(xlsx_multi_sheet)
+    assert _sem_linha_vazia_em_tabela(md), md
+    assert "## Sheet1\n\n| A | B |\n| --- | --- |\n| 1 | 2 |" in md
+    assert "| 1 | 2 |\n\n## Sheet2" in md
+
+
+def test_csv_tabela_sem_linha_em_branco(csv_simples):
+    """CSV mantém tabela contígua (referência de comportamento correto)."""
+    md = planilha_to_md(csv_simples)
+    assert _sem_linha_vazia_em_tabela(md), md
+
+
 # ── Testes do helper _celula_str ─────────────────────────────────────────────
 
 def test_celula_str_none():

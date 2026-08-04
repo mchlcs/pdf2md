@@ -55,6 +55,9 @@ def _xlsx_para_md(path: Path) -> str:
             "Falha ao abrir XLSX — arquivo corrompido ou formato inválido"
         ) from exc
 
+    # Cada aba vira um bloco "## Nome\n\n<tabela>"; blocos separados por "\n\n".
+    # Linhas da tabela usam "\n" simples — linha em branco no meio quebra a
+    # renderização em GFM/Obsidian.
     partes: list[str] = []
 
     try:
@@ -65,19 +68,21 @@ def _xlsx_para_md(path: Path) -> str:
             if not rows:
                 continue
 
-            partes.append(f"## {sheet_name}")
-
             headers = [_celula_str(c) for c in rows[0]]
             if not any(headers):
+                partes.append(f"## {sheet_name}")
                 continue
 
-            partes.append("| " + " | ".join(headers) + " |")
-            partes.append("| " + " | ".join(["---"] * len(headers)) + " |")
+            linhas: list[str] = []
+            linhas.append("| " + " | ".join(headers) + " |")
+            linhas.append("| " + " | ".join(["---"] * len(headers)) + " |")
 
             for row in rows[1:]:
                 celulas = [_celula_str(c) for c in row]
                 if any(celulas):
-                    partes.append("| " + " | ".join(celulas) + " |")
+                    linhas.append("| " + " | ".join(celulas) + " |")
+
+            partes.append(f"## {sheet_name}\n\n" + "\n".join(linhas))
     finally:
         wb.close()
 
