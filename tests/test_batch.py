@@ -298,15 +298,16 @@ def test_batch_imagens_assets_compartilhado_com_prefixo(tmp_path):
     assert "alfa__img_p001_0.png" in md_alfa
 
 
-def test_batch_imagens_fora_do_pdf_emite_aviso(tmp_path):
-    """--imagens em DOCX → aviso, não erro (semântica PDF-only)."""
-    from docx import Document
+def test_batch_imagens_fora_do_pdf_docx_emite_aviso(tmp_path):
+    """--imagens em PPTX → aviso, não erro (semântica PDF/DOCX-only)."""
+    from pptx import Presentation
 
     entrada = tmp_path / "entrada"
     entrada.mkdir()
-    docx = Document()
-    docx.add_paragraph("Conteudo de um DOCX qualquer.")
-    docx.save(str(entrada / "relatorio.docx"))
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[5])
+    slide.shapes.title.text = "Slide de teste"
+    prs.save(str(entrada / "apresentacao.pptx"))
 
     resultados = batch_convert(
         origem=entrada,
@@ -317,7 +318,7 @@ def test_batch_imagens_fora_do_pdf_emite_aviso(tmp_path):
 
     assert len(resultados) == 1
     assert resultados[0].status == StatusArquivo.CONCLUIDO
-    assert any("só se aplica a PDFs" in aviso for aviso in resultados[0].avisos)
+    assert any("só se aplica a PDF e DOCX" in aviso for aviso in resultados[0].avisos)
 
 
 def test_batch_imagens_obsidian_attachments(tmp_path):
@@ -341,3 +342,73 @@ def test_batch_imagens_obsidian_attachments(tmp_path):
     assert (attachments / "nota__img_p001_0.png").exists()
     md = (vault / "nota.md").read_text(encoding="utf-8")
     assert "![[nota__img_p001_0.png]]" in md
+
+
+def test_batch_docx_imagens_extrair(tmp_path):
+    """DOCX + --imagens extrair: assets por arquivo, sem aviso de formato."""
+    import tempfile
+
+    from docx import Document
+    from PIL import Image
+
+    entrada = tmp_path / "entrada"
+    entrada.mkdir()
+    docx = Document()
+    docx.add_paragraph("Relatorio com figura.")
+    p = docx.add_paragraph()
+    run = p.add_run()
+    img = Image.new("RGB", (30, 30), color=(30, 120, 200))
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+        img.save(tmp.name)
+        run.add_picture(tmp.name)
+    docx.save(str(entrada / "relatorio.docx"))
+
+    resultados = batch_convert(
+        origem=entrada,
+        destino=tmp_path / "saida",
+        workers=1,
+        modo_imagem=ModoImagem.extrair,
+    )
+
+    assert resultados[0].status == StatusArquivo.CONCLUIDO
+    assert not any("só se aplica a PDF e DOCX" in aviso for aviso in resultados[0].avisos)
+    assets = tmp_path / "saida" / "relatorio_assets"
+    assert (assets / "img_0001.png").exists()
+    md = (tmp_path / "saida" / "relatorio.md").read_text(encoding="utf-8")
+    assert "relatorio_assets/img_0001.png" in md
+    assert "base64" not in md
+
+
+def test_batch_docx_obsidian_wikilink(tmp_path):
+    """DOCX + --obsidian: wikilink e assets em vault/attachments."""
+    import tempfile
+
+    from docx import Document
+    from PIL import Image
+
+    entrada = tmp_path / "entrada"
+    entrada.mkdir()
+    docx = Document()
+    docx.add_paragraph("Nota com figura.")
+    p = docx.add_paragraph()
+    run = p.add_run()
+    img = Image.new("RGB", (30, 30), color=(90, 200, 40))
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+        img.save(tmp.name)
+        run.add_picture(tmp.name)
+    docx.save(str(entrada / "nota.docx"))
+    vault = tmp_path / "vault"
+    vault.mkdir()
+
+    resultados = batch_convert(
+        origem=entrada,
+        destino=tmp_path / "ignorado",
+        vault=vault,
+        workers=1,
+        modo_imagem=ModoImagem.extrair,
+    )
+
+    assert resultados[0].status == StatusArquivo.CONCLUIDO
+    assert (vault / "attachments" / "nota__img_0001.png").exists()
+    md = (vault / "nota.md").read_text(encoding="utf-8")
+    assert "![[nota__img_0001.png]]" in md

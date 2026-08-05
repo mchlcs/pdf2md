@@ -3,10 +3,16 @@
 Based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [SemVer](https://semver.org/).
 
-## [Unreleased]
+## [0.6.0] — 2026-08-05
 
 ### Added
 
+- **DOCX unificado com o PDF (T19):** `doc_to_md` para de embutir base64 por
+  padrão (decisão D2) e passa a respeitar `--imagens` — `extrair` grava
+  assets com **posição preservada** no documento, `ambos` usa OCR como
+  alt-text, `ignorar` descarta. Maquinaria de segurança compartilhada via
+  `core/image_assets.py` (dedup, nomenclatura, limites, symlink).
+  `core/pdf_images.py` fica só com a parte PyMuPDF.
 - **`--imagens transcrever|extrair|ambos|ignorar`** (PDF-only): política de
   imagens embutidas. `extrair` salva os assets (default `<stem>_assets/`) e
   linka `![](...)`; `ambos` extrai e usa OCR como alt-text; `ignorar`

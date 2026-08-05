@@ -9,7 +9,7 @@ Convert PDFs, images, Word, PPTX and spreadsheets to Markdown — batch processi
 | Format | Conversion |
 |--------|-----------|
 | `.pdf` | Native text extraction + automatic OCR for scanned pages |
-| `.docx` | mammoth — preserves headings, bold, lists, tables |
+| `.docx` | mammoth — headings, bold, lists, tables; images follow `--imagens` (no more base64) |
 | `.doc` | textutil (native macOS — no extra install needed) |
 | `.pptx` | python-pptx — slides, titles, tables |
 | `.xlsx` | openpyxl — each sheet becomes a Markdown table |

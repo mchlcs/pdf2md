@@ -132,3 +132,31 @@ def image_to_md(path: Path) -> str:
                 return texto_llm
 
     return texto
+
+
+def ocr_bytes(dados: bytes, extensao: str) -> str:
+    """
+    OCR de bytes de imagem via imagem temporária (modo `ambos` do --imagens).
+
+    Alt-text para os links de imagem extraída de PDF/DOCX: reusa o mesmo
+    pipeline de image_to_md em arquivo temporário, apagado no finally.
+    """
+    import tempfile
+
+    with tempfile.NamedTemporaryFile(suffix=extensao, delete=False) as tmp:
+        tmp_path = Path(tmp.name)
+        tmp_path.write_bytes(dados)
+
+    try:
+        return image_to_md(tmp_path).strip()
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
+def alt_text_enxuto(ocr: str, max_chars: int = 120) -> str:
+    """Alt-text enxuto: primeira linha não vazia, truncada."""
+    for linha in ocr.splitlines():
+        if linha.strip():
+            limpa = linha.strip()
+            return limpa[:max_chars] + ("…" if len(limpa) > max_chars else "")
+    return "imagem"

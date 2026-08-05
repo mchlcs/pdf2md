@@ -11,7 +11,12 @@ from pathlib import Path
 import fitz  # PyMuPDF
 import pymupdf4llm
 
-from core.image_converter import _configurar_tesseract_cmd, image_to_md
+from core.image_converter import (
+    _configurar_tesseract_cmd,
+    alt_text_enxuto,
+    image_to_md,
+    ocr_bytes,
+)
 from core.pdf_images import ColetorAssets, extrair_imagens
 from core.utils import (
     _MAX_BYTES_RENDER_PAGINA,
@@ -29,9 +34,6 @@ _OCR_DPI = 300
 # Margem vertical padrão (em % da altura da página) ignorada quando
 # --ignorar-margens está ativo. Cobre cabeçalhos e rodapés comuns.
 _MARGEM_PADRAO_PCT = 5.0
-
-# Alt-text enxuto para links de imagem (modo `ambos`): primeira linha, 120 chars.
-_ALT_MAX_CHARS = 120
 
 
 @dataclass
@@ -238,7 +240,7 @@ def _persistir_render_pagina(
     pix: fitz.Pixmap, num_pagina: int, contexto: _ContextoImagens, texto: str
 ) -> str:
     """Persiste o render da página-scan (D3) e anexa o link ao MD."""
-    from core.pdf_images import _caminho_seguro, _preparar_assets_dir
+    from core.pdf_images import caminho_seguro, preparar_assets_dir
 
     dados = pix.tobytes("png")
     if len(dados) > _MAX_BYTES_RENDER_PAGINA:
@@ -249,10 +251,10 @@ def _persistir_render_pagina(
         return texto
 
     # Valida/cria o diretório (mesmas regras dos assets: symlink recusado)
-    dir_assets = _preparar_assets_dir(contexto.assets_dir)
+    dir_assets = preparar_assets_dir(contexto.assets_dir)
 
     nome = f"{contexto.coletor.prefixo}p{num_pagina + 1:03d}_full.png"
-    caminho = _caminho_seguro(dir_assets, nome)
+    caminho = caminho_seguro(dir_assets, nome)
     caminho.write_bytes(dados)
 
     return texto.rstrip() + "\n\n" + _link_arquivo(nome, caminho, contexto, f"página {num_pagina + 1}")
@@ -271,7 +273,7 @@ def _anexar_imagens_embutidas(
     for asset in assets:
         alt = "imagem"
         if contexto.modo == ModoImagem.ambos and not asset.duplicado:
-            alt = _ocr_bytes(asset.dados, asset.extensao)
+            alt = alt_text_enxuto(ocr_bytes(asset.dados, asset.extensao))
         links.append(_link_arquivo(asset.nome, asset.caminho_disco, contexto, alt))
 
     return texto.rstrip() + "\n\n" + "\n\n".join(links)
@@ -285,26 +287,3 @@ def _link_arquivo(nome: str, caminho_disco: Path, contexto: _ContextoImagens, al
     # e os caminhos dos assets já saem resolvidos — mistura viraria relpath gigante.
     rel = os.path.relpath(caminho_disco, contexto.md_dir.resolve())
     return f"![{alt}]({rel})"
-
-
-def _ocr_bytes(dados: bytes, extensao: str) -> str:
-    """OCR de bytes de imagem via image_to_md (modo `ambos` — alt-text)."""
-    with tempfile.NamedTemporaryFile(suffix=extensao, delete=False) as tmp:
-        tmp_path = Path(tmp.name)
-        tmp_path.write_bytes(dados)
-
-    try:
-        texto = image_to_md(tmp_path).strip()
-    finally:
-        tmp_path.unlink(missing_ok=True)
-
-    return _alt_text(texto)
-
-
-def _alt_text(ocr: str) -> str:
-    """Alt-text enxuto: primeira linha não vazia, truncada."""
-    for linha in ocr.splitlines():
-        if linha.strip():
-            limpa = linha.strip()
-            return limpa[:_ALT_MAX_CHARS] + ("…" if len(limpa) > _ALT_MAX_CHARS else "")
-    return "imagem"

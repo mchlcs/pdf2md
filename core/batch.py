@@ -157,9 +157,33 @@ def _converter_arquivo(
             origem, ignorar_margens, modo_imagem,
             destino, obsidian, assets_dir_str, avisos,
         )
+    if conversor is doc_to_md:
+        return _docx_to_md(
+            origem, modo_imagem, destino, obsidian, assets_dir_str, avisos
+        )
     if modo_imagem != ModoImagem.transcrever and avisos is not None:
-        avisos.append("--imagens só se aplica a PDFs — modo ignorado para este arquivo")
+        avisos.append("--imagens só se aplica a PDF e DOCX — modo ignorado para este arquivo")
     return conversor(origem)
+
+
+def _resolver_assets(
+    origem: Path, destino: Path | None, obsidian: bool, assets_dir_str: str | None
+) -> tuple[Path, str]:
+    """
+    Resolve o destino dos assets (D1) e o prefixo de nomes.
+
+    - default: `<stem>_assets/` ao lado do .md
+    - `--assets-dir` explícito ou Obsidian: diretório COMPARTILHADO →
+      prefixo por stem (sem colisão de img_... sob ThreadPool)
+
+    No batch, `destino` é o caminho do .md (arquivo) — o diretório é .parent.
+    """
+    destino_efetivo = destino.parent if destino else origem.parent
+    if assets_dir_str:
+        return Path(assets_dir_str), f"{origem.stem}__"
+    if obsidian:
+        return destino_efetivo / "attachments", f"{origem.stem}__"
+    return destino_efetivo / f"{origem.stem}_assets", ""
 
 
 def _pdf_to_md(
@@ -171,35 +195,41 @@ def _pdf_to_md(
     assets_dir_str: str | None,
     avisos: list[str] | None,
 ) -> str:
-    """
-    Resolve o destino dos assets (D1) e chama pdf_to_md.
-
-    - default: `<stem>_assets/` ao lado do .md
-    - `--assets-dir` explícito: diretório compartilhado → prefixo por stem
-      (sem colisão de img_p001_0.png sob ThreadPool)
-    - Obsidian: vault/attachments + wikilinks (D1)
-    """
+    """Chama pdf_to_md com os assets resolvidos (default byte-idêntico)."""
     if modo_imagem == ModoImagem.transcrever:
         return pdf_to_md(origem, ignorar_margens=ignorar_margens)
 
-    # No batch, `destino` é o caminho do .md (arquivo) — o diretório é .parent
-    destino_efetivo = destino.parent if destino else origem.parent
-    if assets_dir_str:
-        assets = Path(assets_dir_str)
-        prefixo = f"{origem.stem}__"
-    elif obsidian:
-        assets = destino_efetivo / "attachments"
-        prefixo = f"{origem.stem}__"
-    else:
-        assets = destino_efetivo / f"{origem.stem}_assets"
-        prefixo = ""
-
+    assets, prefixo = _resolver_assets(origem, destino, obsidian, assets_dir_str)
     return pdf_to_md(
         origem,
         ignorar_margens=ignorar_margens,
         modo_imagem=modo_imagem,
         assets_dir=assets,
-        md_dir=destino_efetivo,
+        md_dir=destino.parent if destino else origem.parent,
+        wikilinks=obsidian,
+        prefixo_nome=prefixo,
+        avisos=avisos,
+    )
+
+
+def _docx_to_md(
+    origem: Path,
+    modo_imagem: ModoImagem,
+    destino: Path | None,
+    obsidian: bool,
+    assets_dir_str: str | None,
+    avisos: list[str] | None,
+) -> str:
+    """Chama doc_to_md com os assets resolvidos (default descarta imagens)."""
+    if modo_imagem == ModoImagem.transcrever:
+        return doc_to_md(origem)
+
+    assets, prefixo = _resolver_assets(origem, destino, obsidian, assets_dir_str)
+    return doc_to_md(
+        origem,
+        modo_imagem=modo_imagem,
+        assets_dir=assets,
+        md_dir=destino.parent if destino else origem.parent,
         wikilinks=obsidian,
         prefixo_nome=prefixo,
         avisos=avisos,

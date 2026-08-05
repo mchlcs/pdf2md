@@ -72,3 +72,33 @@ Decisões travadas:
 - **`write_images` do pymupdf4llm:** gera nomes dos metadados e não dá
   controle de diretório/dedup/limites — a camada própria (`core/pdf_images.py`)
   ficou sob nosso controle de segurança.
+
+---
+
+## Emenda — T19: unificação com DOCX (2026-08-04)
+
+A Parte 1 afirmava que DOCX "descarta imagem, texto só" — **errado**: o
+`doc_to_md()` (mammoth) embutia **data-URI base64** por padrão
+(`![](data:image/png;base64,...)`). Ou seja, a política era inconsistente:
+PDF descartava, DOCX embutia — e o base64, rejeitado na D2, era o padrão de
+fato do DOCX.
+
+### Decisão (T19)
+
+1. **DOCX para de embutir base64 por padrão.** `transcrever` (default) e
+   `ignorar` descartam imagens — handler vazio do mammoth
+   (`mammoth.images.img_element`), que substitui o data-URI padrão.
+   Mudança de comportamento intencional (D2).
+2. **DOCX respeita `--imagens`:** `extrair` grava assets e insere o link no
+   **ponto exato** do documento (o handler do mammoth preserva posição —
+   vantagem sobre o PDF, que anexa links no fim do chunk da página); `ambos`
+   extrai + OCR como alt-text.
+3. **Maquinaria compartilhada:** `core/image_assets.py` (dedup D4, nome
+   sempre gerado D5, limites, symlink, containment) serve PDF e DOCX.
+   `core/pdf_images.py` ficou só com a parte PyMuPDF. Nomes do DOCX:
+   `img_{n:04d}.{ext}`; content-type fora do mapa de MIME → descartada com
+   aviso (ex.: EMF não tem conversor confiável).
+4. **Wikilinks (D1):** pós-processamento seguro — só links cujo `src` é um
+   nome gerado por nós viram `![[...]]`.
+5. **Aviso de formato:** só PPTX/XLSX/CSV/imagem recebem o aviso
+   "--imagens só se aplica a PDF e DOCX".

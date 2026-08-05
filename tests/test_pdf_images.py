@@ -11,12 +11,8 @@ import fitz  # PyMuPDF
 import pytest
 from PIL import Image
 
-from core.pdf_images import (
-    ColetorAssets,
-    _caminho_seguro,
-    _preparar_assets_dir,
-    extrair_imagens,
-)
+from core.image_assets import ColetorAssets, caminho_seguro, preparar_assets_dir
+from core.pdf_images import extrair_imagens
 
 
 def _imagem_png(tmp_path: Path, nome: str, cor: tuple[int, int, int]) -> Path:
@@ -114,7 +110,7 @@ def test_limite_bytes_por_imagem(tmp_path):
 
     with (
         fitz.open(str(pdf)) as doc,
-        patch("core.pdf_images._MAX_BYTES_IMAGEM", 10),
+        patch("core.image_assets._MAX_BYTES_IMAGEM", 10),
     ):
         assets, avisos = extrair_imagens(doc, 0, assets_dir)
 
@@ -151,15 +147,15 @@ def test_ext_hostil_documento_normalizada_para_png(tmp_path):
     assert list(assets_dir.iterdir())[0].name == "img_p001_0.png"
 
 
-def test_caminho_seguro_rejeita_traversal(tmp_path):
-    """Nome com '/' ou '..' é rejeitado por _caminho_seguro (CWE-22)."""
-    assets_dir = _preparar_assets_dir(tmp_path / "assets")
+def testcaminho_seguro_rejeita_traversal(tmp_path):
+    """Nome com '/' ou '..' é rejeitado por caminho_seguro (CWE-22)."""
+    assets_dir = preparar_assets_dir(tmp_path / "assets")
     with pytest.raises(ValueError):
-        _caminho_seguro(assets_dir, "../escape.png")
+        caminho_seguro(assets_dir, "../escape.png")
     with pytest.raises(ValueError):
-        _caminho_seguro(assets_dir, "a/b.png")
+        caminho_seguro(assets_dir, "a/b.png")
     with pytest.raises(ValueError):
-        _caminho_seguro(assets_dir, "..\\evil.png")
+        caminho_seguro(assets_dir, "..\\evil.png")
 
 
 # ── Caso 5: assets_dir symlink é recusado ────────────────────────────────────

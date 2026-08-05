@@ -127,7 +127,7 @@ def test_pdf_imagens_ambos_ocr_como_alt_text(tmp_path):
     """Modo ambos: OCR da imagem vira alt-text do link."""
     pdf = _pdf_texto_com_imagens(tmp_path, qtd=1)
 
-    with patch("core.converter.image_to_md", return_value="TEXTO OCR DA IMAGEM"):
+    with patch("core.image_converter.image_to_md", return_value="TEXTO OCR DA IMAGEM"):
         md = pdf_to_md(pdf, modo_imagem=ModoImagem.ambos)
 
     assert "![TEXTO OCR DA IMAGEM](imagens_assets/img_p001_0.png)" in md

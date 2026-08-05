@@ -1,98 +1,38 @@
 """
-Extração segura de imagens embutidas de PDFs (feature `--imagens`).
+Extração de imagens embutidas de PDFs (feature `--imagens`).
 
-Decisões (ADR-0005):
-- D4 — dedup por SHA-256: mesmo conteúdo → 1 arquivo, N links no MD.
-- D5 — nomenclatura SEMPRE gerada (`img_p{pagina:03d}_{idx}.{ext}`):
-  nomes vindos do documento (metadado da imagem) nunca tocam o filesystem —
-  neutraliza path traversal (CWE-22).
-- Segurança (gate Sentinel): limites anti resource-bomb por documento
-  (total de imagens) e por imagem (bytes); diretório de assets que é
-  symlink é recusado; assert de containment no caminho final.
+A maquinaria genérica de assets (dedup D4, nomenclatura D5, limites e
+segurança) vive em `core/image_assets.py` — compartilhada com o DOCX
+(T19). Aqui ficam só as partes específicas de PDF: leitura de xrefs via
+PyMuPDF e normalização de formatos exóticos para PNG.
+
+Segurança (gate Sentinel):
+- Path traversal (CWE-22): nomes sempre gerados — metadado do documento
+  nunca vira path; extensão passa por allowlist + revalidação na fronteira.
+- Resource bomb: limites por documento (chamador) e por imagem (registrar_asset).
+- Symlink: diretório de assets que é symlink é recusado.
 """
-import hashlib
-import re
-from dataclasses import dataclass, field
 from pathlib import Path
 
 import fitz  # PyMuPDF
 
-from core.utils import (
-    _MAX_BYTES_IMAGEM,
-    _MAX_IMAGENS_PDF,
+from core.image_assets import (
+    _EXTENSOES_SEGURAS,
+    AssetImagem,
+    ColetorAssets,
+    caminho_seguro,
+    preparar_assets_dir,
+    registrar_asset,
 )
+from core.utils import _MAX_IMAGENS_PDF
 
-# Nome de asset: só ASCII seguro — gerado, nunca derivado de metadado do PDF.
-_RE_NOME_SEGURO = re.compile(r"^[A-Za-z0-9._-]+$")
-
-# Extensões aceitas na escrita direta. Extensões exóticas do documento são
-# normalizadas para PNG via Pixmap (evita nome/envio controlado pelo PDF).
-_EXTENSOES_SEGURAS = frozenset({
-    ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".tiff", ".ppm",
-})
-
-
-@dataclass
-class AssetImagem:
-    """Imagem extraída — conteúdo + nome gerado + caminho já gravado."""
-
-    nome: str
-    extensao: str
-    dados: bytes
-    caminho_disco: Path
-    duplicado: bool = False  # True quando o conteúdo já existia (dedup D4)
-
-
-@dataclass
-class ColetorAssets:
-    """
-    Estado da extração por documento.
-
-    Vive por chamada de pdf_to_md (thread-safe: o batch cria um por arquivo).
-    `total` conta imagens processadas (inclusive duplicatas) — é o limite
-    anti resource-bomb do documento.
-    """
-
-    prefixo: str = ""
-    cache: dict[str, AssetImagem] = field(default_factory=dict)
-    total: int = 0
-
-
-def _nome_imagem(num_pagina: int, idx: int, ext: str, prefixo: str = "") -> str:
-    """Gera o nome do asset (D5): posição + índice, nunca metadado do PDF."""
-    return f"{prefixo}img_p{num_pagina + 1:03d}_{idx}.{ext.lstrip('.')}"
-
-
-def _preparar_assets_dir(assets_dir: Path) -> Path:
-    """
-    Valida/cria o diretório de assets (gate Sentinel).
-
-    Recusa: diretório que é symlink, ou path com componentes '..'.
-    """
-    if assets_dir.is_symlink():
-        raise ValueError("diretório de assets não pode ser um symlink")
-    if ".." in assets_dir.parts:
-        raise ValueError("diretório de assets inválido")
-    resolvido = assets_dir.resolve()
-    resolvido.mkdir(parents=True, exist_ok=True)
-    return resolvido
-
-
-def _caminho_seguro(assets_dir: Path, nome: str) -> Path:
-    """
-    Constrói o caminho do asset com nome gerado + assert de containment.
-
-    O nome passa por regex de caracteres seguros (sem '/' ou '..') e o
-    caminho resolvido precisa estar dentro do diretório de assets — mesmo
-    que uma futura mudança introduza metadado na nomenclatura, o arquivo
-    não consegue escapar (CWE-22).
-    """
-    if not _RE_NOME_SEGURO.match(nome):
-        raise ValueError("nome de asset inválido")
-    caminho = (assets_dir / nome).resolve()
-    if assets_dir not in caminho.parents:
-        raise ValueError("asset fora do diretório de assets")
-    return caminho
+__all__ = [
+    "AssetImagem",
+    "ColetorAssets",
+    "extrair_imagens",
+    "preparar_assets_dir",
+    "caminho_seguro",
+]
 
 
 def _converter_png(doc: fitz.Document, xref: int) -> tuple[bytes, str] | None:
@@ -158,7 +98,7 @@ def extrair_imagens(
         (assets, avisos) — assets com arquivo já gravado em disco.
     """
     coletor = coletor or ColetorAssets()
-    assets_dir = _preparar_assets_dir(assets_dir)
+    assets_dir = preparar_assets_dir(assets_dir)
     pagina = doc.load_page(num_pagina)
     assets: list[AssetImagem] = []
     avisos: list[str] = []
@@ -171,7 +111,6 @@ def extrair_imagens(
                 "extração interrompida"
             )
             break
-        coletor.total += 1
 
         extraido = _extrair_bruto(doc, info[0])
         if extraido is None:
@@ -190,37 +129,14 @@ def extrair_imagens(
                 continue
             dados, ext = convertido
 
-        if len(dados) > _MAX_BYTES_IMAGEM:
-            avisos.append(
-                f"imagem {idx + 1} da página {num_pagina + 1} excede "
-                f"{_MAX_BYTES_IMAGEM // (1024 * 1024)} MB — ignorada"
-            )
-            continue
-
-        chave = hashlib.sha256(dados).hexdigest()
-        if chave in coletor.cache:
-            # D4: mesmo conteúdo → mesmo arquivo, link adicional
-            asset = coletor.cache[chave]
-            assets.append(AssetImagem(
-                nome=asset.nome,
-                extensao=asset.extensao,
-                dados=asset.dados,
-                caminho_disco=asset.caminho_disco,
-                duplicado=True,
-            ))
-            continue
-
-        nome = _nome_imagem(num_pagina, idx, ext, coletor.prefixo)
-        caminho = _caminho_seguro(assets_dir, nome)
-        caminho.write_bytes(dados)
-
-        asset = AssetImagem(
-            nome=nome,
-            extensao=ext,
-            dados=dados,
-            caminho_disco=caminho,
+        origem_descricao = f"{idx + 1} da página {num_pagina + 1}"
+        asset, aviso = registrar_asset(
+            assets_dir, coletor,
+            f"img_p{num_pagina + 1:03d}_{idx}", ext, dados, origem_descricao,
         )
-        coletor.cache[chave] = asset
-        assets.append(asset)
+        if aviso:
+            avisos.append(aviso)
+        if asset:
+            assets.append(asset)
 
     return assets, avisos

@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from core.doc_converter import EXTENSOES_DOC, _decodificar_textutil, doc_to_md
+from core.utils import ModoImagem
 
 
 def _criar_docx_simples(path: Path, texto: str = "Conteúdo de teste Word.") -> None:
@@ -161,3 +162,149 @@ def test_batch_doc_extensao_reconhecida(tmp_path):
     assert resultados[0].destino is not None
     assert resultados[0].destino.exists()
     assert resultados[0].destino.read_text(encoding="utf-8").strip() != ""
+
+
+# ── T19: unificação da política de imagens com o PDF ─────────────────────────
+
+def _criar_docx_com_imagem(path: Path, qtd: int = 1, cor=(200, 50, 50)) -> None:
+    """Cria .docx com texto antes/depois e `qtd` imagens embutidas."""
+    import tempfile
+
+    from docx import Document
+    from PIL import Image
+
+    doc = Document()
+    doc.add_paragraph("Antes da imagem:")
+    for i in range(qtd):
+        p = doc.add_paragraph()
+        run = p.add_run()
+        img = Image.new("RGB", (30, 30), color=((cor[0] + i * 40) % 255, cor[1], cor[2]))
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+            img.save(tmp.name)
+            run.add_picture(tmp.name)
+    doc.add_paragraph("Depois da imagem.")
+    doc.save(str(path))
+
+
+def test_docx_default_descarta_base64(tmp_path):
+    """Default (transcrever): sem base64 e sem assets — comportamento novo.
+
+    O mammoth embutia data-URI base64 por padrão (rejeitado na D2); o T19
+    unifica com o PDF: default descarta a imagem.
+    """
+    path = tmp_path / "com_imagem.docx"
+    _criar_docx_com_imagem(path)
+
+    md = doc_to_md(path)
+
+    assert "base64" not in md
+    assert "![" not in md
+    assert "Antes da imagem" in md and "Depois da imagem" in md
+    assert not (tmp_path / "com_imagem_assets").exists()
+
+
+def test_docx_extrair_posicao_preservada(tmp_path):
+    """extrair: asset no disco + link no ponto exato do texto (posição!)."""
+    path = tmp_path / "com_imagem.docx"
+    _criar_docx_com_imagem(path)
+    saida = tmp_path / "out"
+    assets = saida / "com_imagem_assets"
+    saida.mkdir()
+
+    md = doc_to_md(
+        path, modo_imagem=ModoImagem.extrair, assets_dir=assets, md_dir=saida
+    )
+
+    assert (assets / "img_0001.png").exists()
+    # Posição: entre "Antes da imagem" e "Depois da imagem" (≠ PDF, que anexa no fim)
+    pos_antes = md.index("Antes da imagem")
+    pos_link = md.index("![](com_imagem_assets/img_0001.png)")
+    pos_depois = md.index("Depois da imagem")
+    assert pos_antes < pos_link < pos_depois
+
+
+def test_docx_ambos_ocr_como_alt(tmp_path):
+    """ambos: OCR da imagem vira alt-text do link."""
+    from unittest.mock import patch
+
+    path = tmp_path / "com_imagem.docx"
+    _criar_docx_com_imagem(path)
+
+    with patch("core.image_converter.image_to_md", return_value="TEXTO DA IMAGEM OCR"):
+        md = doc_to_md(path, modo_imagem=ModoImagem.ambos)
+
+    assert "![TEXTO DA IMAGEM OCR](com_imagem_assets/img_0001.png)" in md
+
+
+def test_docx_ignorar_descarta(tmp_path):
+    """ignorar: imagem descartada sem escrever nada."""
+    path = tmp_path / "com_imagem.docx"
+    _criar_docx_com_imagem(path)
+
+    md = doc_to_md(path, modo_imagem=ModoImagem.ignorar)
+
+    assert "![" not in md
+    assert "base64" not in md
+    assert not (tmp_path / "com_imagem_assets").exists()
+
+
+def test_docx_obsidian_wikilink(tmp_path):
+    """obsidian (D1): wikilink ![[...]] no MD."""
+    path = tmp_path / "com_imagem.docx"
+    _criar_docx_com_imagem(path)
+    vault = tmp_path / "vault"
+    (vault / "attachments").mkdir(parents=True)
+
+    md = doc_to_md(
+        path,
+        modo_imagem=ModoImagem.extrair,
+        assets_dir=vault / "attachments",
+        md_dir=vault,
+        wikilinks=True,
+        prefixo_nome="com_imagem__",
+    )
+
+    assert "![[com_imagem__img_0001.png]]" in md
+    assert (vault / "attachments" / "com_imagem__img_0001.png").exists()
+
+
+def test_docx_dedup_mesma_imagem(tmp_path):
+    """Duas imagens idênticas → 1 arquivo, 2 links (D4)."""
+    from docx import Document
+
+    path = tmp_path / "duplicada.docx"
+    doc = Document()
+    doc.add_paragraph("Antes:")
+    for _ in range(2):
+        p = doc.add_paragraph()
+        run = p.add_run()
+        import tempfile
+
+        from PIL import Image
+        img = Image.new("RGB", (30, 30), color=(10, 200, 10))
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+            img.save(tmp.name)
+            run.add_picture(tmp.name)
+    doc.add_paragraph("Depois.")
+    doc.save(str(path))
+
+    md = doc_to_md(path, modo_imagem=ModoImagem.extrair)
+
+    assert md.count("![](") == 2          # 2 links
+    assets_dir = tmp_path / "duplicada_assets"
+    assert len(list(assets_dir.iterdir())) == 1  # 1 arquivo no disco
+
+
+def test_docx_limite_imagens_por_documento(tmp_path):
+    """Limite por documento → descarta o restante com aviso (gate Sentinel)."""
+    from unittest.mock import patch
+
+    path = tmp_path / "muitas.docx"
+    _criar_docx_com_imagem(path, qtd=4)
+    avisos: list[str] = []
+
+    with patch("core.doc_converter._MAX_IMAGENS_PDF", 2):
+        md = doc_to_md(path, modo_imagem=ModoImagem.extrair, avisos=avisos)
+
+    assert md.count("![](") == 2
+    assert any("limite" in a for a in avisos)
