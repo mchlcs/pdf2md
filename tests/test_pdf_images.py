@@ -93,7 +93,7 @@ def test_limite_imagens_por_documento(tmp_path):
 
     with (
         fitz.open(str(pdf)) as doc,
-        patch("core.pdf_images._MAX_IMAGENS_PDF", 2),
+        patch("core.image_assets._MAX_IMAGENS_PDF", 2),
     ):
         assets, avisos = extrair_imagens(doc, 0, assets_dir)
 
@@ -192,3 +192,67 @@ def test_pdf_sem_imagem(tmp_path):
 
     assert assets == []
     assert avisos == []
+
+
+# ── Correções de review ──────────────────────────────────────────────────────
+
+def test_ambos_gif_nao_crasha(tmp_path):
+    """Modo ambos com GIF embutido: normaliza p/ PNG, sem crash (review).
+
+    _EXTENSOES_SEGURAS aceita .gif, mas EXTENSOES_IMAGEM (OCR) não —
+    antes, ocr_bytes explodia ValueError e derrubava a conversão.
+    """
+    from core.converter import pdf_to_md
+    from core.utils import ModoImagem as Modo
+
+    # PDF com GIF embutido
+    gif_path = tmp_path / "anim.gif"
+    frames = [Image.new("RGB", (20, 20), color=cor) for cor in ((255, 0, 0), (0, 255, 0))]
+    frames[0].save(gif_path, save_all=True, append_images=frames[1:], duration=100, loop=0)
+
+    pdf = tmp_path / "com_gif.pdf"
+    doc = fitz.open()
+    pagina = doc.new_page(width=595, height=842)
+    pagina.insert_text(
+        (50, 150),
+        "Pagina com GIF embutido para testar o modo ambos sem crash.",
+    )
+    pagina.insert_image(fitz.Rect(50, 50, 90, 90), filename=str(gif_path))
+    doc.save(str(pdf))
+    doc.close()
+
+    md = pdf_to_md(pdf, modo_imagem=Modo.ambos)
+
+    assert "![" in md  # link gerado (asset GIF persistido)
+    assets = tmp_path / "com_gif_assets"
+    assert len(list(assets.iterdir())) == 1
+    assert list(assets.iterdir())[0].suffix in (".gif", ".png")
+
+
+def test_scan_renders_contam_no_limite(tmp_path, mock_tesseract):
+    """Renders de página-scan contam no limite anti bomb (review Spec-2)."""
+    from unittest.mock import patch
+
+    from core.converter import pdf_to_md
+    from core.utils import ModoImagem as Modo
+
+    # PDF com 2 páginas-scan
+    pdf = tmp_path / "scan_duplo.pdf"
+    img = Image.new("RGB", (300, 100), color="white")
+    img_path = tmp_path / "s.png"
+    img.save(img_path)
+    doc = fitz.open()
+    for _ in range(2):
+        pagina = doc.new_page(width=300, height=100)
+        pagina.insert_image(fitz.Rect(0, 0, 300, 100), filename=str(img_path))
+    doc.save(str(pdf))
+    doc.close()
+
+    avisos: list[str] = []
+    with patch("core.image_assets._MAX_IMAGENS_PDF", 1):
+        md = pdf_to_md(pdf, modo_imagem=Modo.extrair, avisos=avisos)
+
+    assets = tmp_path / "scan_duplo_assets"
+    assert len(list(assets.iterdir())) == 1  # só o primeiro render
+    assert any("limite" in a for a in avisos)
+    assert md.count("![[") + md.count("![") == 1

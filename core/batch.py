@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
+from typing import Any
 
 from core.converter import pdf_to_md
 from core.doc_converter import doc_to_md
@@ -174,16 +175,40 @@ def _resolver_assets(
 
     - default: `<stem>_assets/` ao lado do .md
     - `--assets-dir` explícito ou Obsidian: diretório COMPARTILHADO →
-      prefixo por stem (sem colisão de img_... sob ThreadPool)
+      prefixo por stem — usa o stem do .md DESTINO, que o batch já tornou
+      único (`_nome_destino_unico`): dois PDFs de origens distintas com o
+      mesmo nome viram `a.md`/`a-pdf.md` → prefixos `a__`/`a-pdf__`, sem
+      sobrescrever assets um do outro sob ThreadPool.
 
     No batch, `destino` é o caminho do .md (arquivo) — o diretório é .parent.
     """
     destino_efetivo = destino.parent if destino else origem.parent
+    prefixo = f"{destino.stem}__" if destino else f"{origem.stem}__"
     if assets_dir_str:
-        return Path(assets_dir_str), f"{origem.stem}__"
+        return Path(assets_dir_str), prefixo
     if obsidian:
-        return destino_efetivo / "attachments", f"{origem.stem}__"
+        return destino_efetivo / "attachments", prefixo
     return destino_efetivo / f"{origem.stem}_assets", ""
+
+
+def _kwargs_assets(
+    origem: Path,
+    modo_imagem: ModoImagem,
+    destino: Path | None,
+    obsidian: bool,
+    assets_dir_str: str | None,
+    avisos: list[str] | None,
+) -> dict[str, Any]:
+    """Kwargs comuns de `--imagens` para os conversores (D1 + prefixo)."""
+    assets, prefixo = _resolver_assets(origem, destino, obsidian, assets_dir_str)
+    return {
+        "modo_imagem": modo_imagem,
+        "assets_dir": assets,
+        "md_dir": destino.parent if destino else origem.parent,
+        "wikilinks": obsidian,
+        "prefixo_nome": prefixo,
+        "avisos": avisos,
+    }
 
 
 def _pdf_to_md(
@@ -198,17 +223,10 @@ def _pdf_to_md(
     """Chama pdf_to_md com os assets resolvidos (default byte-idêntico)."""
     if modo_imagem == ModoImagem.transcrever:
         return pdf_to_md(origem, ignorar_margens=ignorar_margens)
-
-    assets, prefixo = _resolver_assets(origem, destino, obsidian, assets_dir_str)
     return pdf_to_md(
         origem,
         ignorar_margens=ignorar_margens,
-        modo_imagem=modo_imagem,
-        assets_dir=assets,
-        md_dir=destino.parent if destino else origem.parent,
-        wikilinks=obsidian,
-        prefixo_nome=prefixo,
-        avisos=avisos,
+        **_kwargs_assets(origem, modo_imagem, destino, obsidian, assets_dir_str, avisos),
     )
 
 
@@ -223,16 +241,9 @@ def _docx_to_md(
     """Chama doc_to_md com os assets resolvidos (default descarta imagens)."""
     if modo_imagem == ModoImagem.transcrever:
         return doc_to_md(origem)
-
-    assets, prefixo = _resolver_assets(origem, destino, obsidian, assets_dir_str)
     return doc_to_md(
         origem,
-        modo_imagem=modo_imagem,
-        assets_dir=assets,
-        md_dir=destino.parent if destino else origem.parent,
-        wikilinks=obsidian,
-        prefixo_nome=prefixo,
-        avisos=avisos,
+        **_kwargs_assets(origem, modo_imagem, destino, obsidian, assets_dir_str, avisos),
     )
 
 

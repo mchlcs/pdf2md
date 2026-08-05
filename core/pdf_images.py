@@ -24,7 +24,6 @@ from core.image_assets import (
     preparar_assets_dir,
     registrar_asset,
 )
-from core.utils import _MAX_IMAGENS_PDF
 
 __all__ = [
     "AssetImagem",
@@ -105,16 +104,15 @@ def extrair_imagens(
 
     informacoes = pagina.get_images(full=True)
     for idx, info in enumerate(informacoes):
-        if coletor.total >= _MAX_IMAGENS_PDF:
+        if coletor.atingiu_limite():
             avisos.append(
-                f"limite de {_MAX_IMAGENS_PDF} imagens por documento excedido — "
-                "extração interrompida"
+                "limite de imagens por documento excedido — extração interrompida"
             )
             break
 
         extraido = _extrair_bruto(doc, info[0])
         if extraido is None:
-            avisos.append(f"imagem {idx + 1} da página {num_pagina + 1} não pôde ser extraída")
+            avisos.append(_aviso_nao_extraida(idx, num_pagina))
             continue
         dados, ext = extraido
 
@@ -123,9 +121,7 @@ def extrair_imagens(
         if ext not in _EXTENSOES_SEGURAS:
             convertido = _converter_png(doc, info[0])
             if convertido is None:
-                avisos.append(
-                    f"imagem {idx + 1} da página {num_pagina + 1} não pôde ser extraída"
-                )
+                avisos.append(_aviso_nao_extraida(idx, num_pagina))
                 continue
             dados, ext = convertido
 
@@ -140,3 +136,8 @@ def extrair_imagens(
             assets.append(asset)
 
     return assets, avisos
+
+
+def _aviso_nao_extraida(idx: int, num_pagina: int) -> str:
+    """Aviso único de falha de extração (CWE-209: sem paths do documento)."""
+    return f"imagem {idx + 1} da página {num_pagina + 1} não pôde ser extraída"

@@ -24,12 +24,12 @@ from typing import IO, Protocol
 
 from core.image_assets import (
     ColetorAssets,
+    ContextoAssets,
     preparar_assets_dir,
     registrar_asset,
 )
 from core.image_converter import alt_text_enxuto, ocr_bytes
 from core.utils import (  # fonte única da verdade (re-exportado)
-    _MAX_IMAGENS_PDF,
     EXTENSOES_DOC,
     ModoImagem,
     _validar_existencia,
@@ -104,15 +104,15 @@ def doc_to_md(
     _validar_extensao(path, EXTENSOES_DOC)
 
     if sufixo == ".docx":
-        return _docx_para_md(
+        return _docx_para_md(path, _montar_contexto(
             path, modo_imagem, assets_dir, md_dir, wikilinks, prefixo_nome, avisos
-        )
+        ))
     else:
         # .doc via textutil: só texto — modo de imagem não se aplica
         return _doc_para_md(path)
 
 
-def _docx_para_md(
+def _montar_contexto(
     path: Path,
     modo_imagem: ModoImagem,
     assets_dir: Path | None,
@@ -120,7 +120,26 @@ def _docx_para_md(
     wikilinks: bool,
     prefixo_nome: str,
     avisos: list[str] | None,
-) -> str:
+) -> ContextoAssets | None:
+    """Constrói o contexto de assets do documento (None p/ transcrever)."""
+    if modo_imagem in (ModoImagem.transcrever, ModoImagem.ignorar):
+        return None
+    from core.image_assets import ColetorAssets
+
+    # Resolvido desde o início: no macOS /var é symlink de /private/var e o
+    # containment assert de caminho_seguro compara paths resolvidos.
+    dir_assets = (assets_dir or (path.parent / f"{path.stem}_assets")).resolve()
+    return ContextoAssets(
+        modo=modo_imagem,
+        coletor=ColetorAssets(prefixo=prefixo_nome),
+        assets_dir=dir_assets,
+        md_dir=(md_dir or dir_assets.parent).resolve(),
+        wikilinks=wikilinks,
+        avisos=avisos if avisos is not None else [],
+    )
+
+
+def _docx_para_md(path: Path, contexto: ContextoAssets | None) -> str:
     """Converte .docx via mammoth — preserva headers, negrito, listas, tabelas.
 
     O handler de imagem substitui o base64 padrão do mammoth: descarta
@@ -136,31 +155,22 @@ def _docx_para_md(
     try:
         # transcrever/ignorar: descarta imagens — sem base64 (T19, D2).
         # O handler vazio impede o data-URI padrão do mammoth.
-        if modo_imagem in (ModoImagem.transcrever, ModoImagem.ignorar):
+        if contexto is None:
             with open(path, "rb") as f:
                 resultado = mammoth.convert_to_markdown(
                     f, convert_image=mammoth.images.img_element(_descartar_imagem)
                 )
             return str(resultado.value).strip()
 
-        coletor = ColetorAssets(prefixo=prefixo_nome)
-        dir_assets = assets_dir or (path.parent / f"{path.stem}_assets")
-        dir_assets = preparar_assets_dir(dir_assets)
-        md_dir_efetivo = (md_dir or dir_assets.parent).resolve()
-
-        handler = mammoth.images.img_element(
-            _montar_handler(
-                modo_imagem, coletor, dir_assets, md_dir_efetivo,
-                wikilinks, avisos if avisos is not None else [],
-            )
-        )
+        preparar_assets_dir(contexto.assets_dir)
+        handler = mammoth.images.img_element(_montar_handler(contexto))
 
         with open(path, "rb") as f:
             resultado = mammoth.convert_to_markdown(f, convert_image=handler)
         md = str(resultado.value)
 
-        if wikilinks:
-            md = _converter_wikilinks(md, coletor)
+        if contexto.wikilinks:
+            md = _converter_wikilinks(md, contexto.coletor)
         return md.strip()
     except Exception as exc:
         raise RuntimeError(
@@ -173,28 +183,27 @@ def _descartar_imagem(image: _ImagemMammoth) -> dict[str, str]:
     return {}
 
 
-def _montar_handler(
-    modo_imagem: ModoImagem,
-    coletor: ColetorAssets,
-    assets_dir: Path,
-    md_dir: Path,
-    wikilinks: bool,
-    avisos: list[str],
-) -> Callable[[object], dict[str, str]]:
+# Marcador de src para o modo wikilink: o mammoth sempre emite `![alt](src)`;
+# o src temporário carrega o marcador para o pós-processo converter SÓ os
+# links que geramos — impossível de colidir com texto do usuário (ao
+# contrário de usar o nome puro do asset).
+_MARCADOR_WIKILINK = "pdf2md-asset://"
+
+
+def _montar_handler(contexto: ContextoAssets) -> Callable[[_ImagemMammoth], dict[str, str]]:
     """Closure do mammoth: recebe a imagem do documento e devolve atributos <img>.
 
-    `src` é o caminho relativo (ou o nome, em wikilinks) do asset gravado.
-    `{}` descarta a imagem (transcrever/ignorar/limite excedido).
+    `src` é o caminho relativo (ou marcador+nome, em wikilinks) do asset
+    gravado. `{}` descarta a imagem (transcrever/ignorar/limite excedido).
     """
     limite_avisado = False
 
     def converter_imagem(image: _ImagemMammoth) -> dict[str, str]:
         nonlocal limite_avisado
-        if coletor.total >= _MAX_IMAGENS_PDF:
+        if contexto.coletor.atingiu_limite():
             if not limite_avisado:
-                avisos.append(
-                    f"limite de {_MAX_IMAGENS_PDF} imagens por documento excedido — "
-                    "imagens restantes descartadas"
+                contexto.avisos.append(
+                    "limite de imagens por documento excedido — imagens restantes descartadas"
                 )
                 limite_avisado = True
             return {}
@@ -204,27 +213,27 @@ def _montar_handler(
 
         ext = _MIME_PARA_EXT.get(image.content_type or "")
         if ext is None:
-            avisos.append(
-                f"imagem {coletor.total + 1} tem formato não suportado "
+            contexto.avisos.append(
+                f"imagem {contexto.coletor.total + 1} tem formato não suportado "
                 f"({image.content_type or 'desconhecido'}) — descartada"
             )
-            coletor.total += 1
+            contexto.coletor.total += 1
             return {}
 
         asset, aviso = registrar_asset(
-            assets_dir, coletor,
-            f"img_{coletor.total + 1:04d}", ext, dados,
-            f"{coletor.total + 1} do documento",
+            contexto.assets_dir, contexto.coletor,
+            f"img_{contexto.coletor.total + 1:04d}", ext, dados,
+            f"{contexto.coletor.total + 1} do documento",
         )
         if aviso:
-            avisos.append(aviso)
+            contexto.avisos.append(aviso)
         if asset is None:
             return {}
 
-        if wikilinks:
-            return {"src": asset.nome}
-        src = {"src": os.path.relpath(asset.caminho_disco, md_dir)}
-        if modo_imagem == ModoImagem.ambos and not asset.duplicado:
+        if contexto.wikilinks:
+            return {"src": f"{_MARCADOR_WIKILINK}{asset.nome}"}
+        src = {"src": os.path.relpath(asset.caminho_disco, contexto.md_dir)}
+        if contexto.modo == ModoImagem.ambos and not asset.duplicado:
             src["alt"] = alt_text_enxuto(ocr_bytes(asset.dados, asset.extensao))
         return src
 
@@ -232,16 +241,19 @@ def _montar_handler(
 
 
 def _converter_wikilinks(md: str, coletor: ColetorAssets) -> str:
-    """![](...) → ![[...]] apenas para links que geramos (D1 — Obsidian)."""
+    """![](...) → ![[...]] apenas para links com o marcador gerado por nós (D1)."""
+    padrao = re.compile(
+        rf"!\[([^\]]*)\]\({re.escape(_MARCADOR_WIKILINK)}([^)]*)\)"
+    )
     nomes = {asset.nome for asset in coletor.cache.values()}
 
     def _sub(m: re.Match[str]) -> str:
-        src = m.group(2)
-        if src in nomes:
-            return f"![[{src}]]"
+        nome = m.group(2)
+        if nome in nomes:
+            return f"![[{nome}]]"
         return m.group(0)
 
-    return re.sub(r"!\[([^\]]*)\]\(([^)]*)\)", _sub, md)
+    return padrao.sub(_sub, md)
 
 
 def _decodificar_textutil(dados: bytes) -> str:
@@ -270,7 +282,7 @@ def _doc_para_md(path: Path) -> str:
 
     # .docx (zip) disfarçado de .doc — roteia direto pro mammoth
     if assinatura[:2] == b"PK":
-        return _docx_para_md(path, ModoImagem.transcrever, None, None, False, "", None)
+        return _docx_para_md(path, None)
 
     try:
         # capture_output sem text=True → bytes, decodificados defensivamente

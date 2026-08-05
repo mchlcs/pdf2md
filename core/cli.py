@@ -140,9 +140,9 @@ def converter(
     ),
     imagens: ModoImagem = typer.Option(
         ModoImagem.transcrever, "--imagens",
-        help="Política de imagens embutidas em PDFs: transcrever (OCR de scans), "
+        help="Política de imagens embutidas em PDF e DOCX: transcrever (OCR de scans), "
              "extrair (salva assets + links), ambos (extrai + OCR no alt-text) ou "
-             "ignorar (descarta sem OCR). Só se aplica a PDFs.",
+             "ignorar (descarta sem OCR). Só se aplica a PDF e DOCX.",
     ),
     assets_dir: Path | None = typer.Option(
         None, "--assets-dir",

@@ -303,7 +303,7 @@ def test_docx_limite_imagens_por_documento(tmp_path):
     _criar_docx_com_imagem(path, qtd=4)
     avisos: list[str] = []
 
-    with patch("core.doc_converter._MAX_IMAGENS_PDF", 2):
+    with patch("core.image_assets._MAX_IMAGENS_PDF", 2):
         md = doc_to_md(path, modo_imagem=ModoImagem.extrair, avisos=avisos)
 
     assert md.count("![](") == 2

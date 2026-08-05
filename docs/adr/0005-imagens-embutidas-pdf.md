@@ -102,3 +102,21 @@ fato do DOCX.
    nome gerado por nós viram `![[...]]`.
 5. **Aviso de formato:** só PPTX/XLSX/CSV/imagem recebem o aviso
    "--imagens só se aplica a PDF e DOCX".
+
+### Emenda 2 — review do PR (2026-08-05)
+
+- **Crash `ambos` + GIF/PPM corrigido:** `ocr_bytes` normaliza formatos fora
+  de `EXTENSOES_IMAGEM` para PNG via Pillow e falha vira `""` (alt cai para
+  "imagem") — nunca derruba a conversão.
+- **Renders de scan contam no resource bomb:** `p{n}_full.png` passa pelo
+  limite de 500 do coletor (antes, um scan de 10k páginas gravava 10k PNGs).
+- **Colisão de stem em dirs compartilhados:** o prefixo usa o stem do `.md`
+  DESTINO (já único via `_nome_destino_unico`) — `rel.pdf` + `rel.docx`
+  viram `rel-pdf__`/`rel__`, sem sobrescrever assets.
+- **Memória do dedup limitada:** o cache guarda só nome/path (sem bytes) —
+  o teto teórico de 500×50 MB deixa de existir.
+- **Wikilinks DOCX via marcador** `pdf2md-asset://`: o pós-processamento só
+  converte srcs que nós geramos (sem colisão com texto do usuário).
+- **Data Clump morta:** `ContextoAssets` (modo/coletor/assets_dir/md_dir/
+  wikilinks/avisos) compartilhado por `pdf_to_md` e `doc_to_md`; o limite
+  anti bomb vive em `ColetorAssets.atingiu_limite()`.

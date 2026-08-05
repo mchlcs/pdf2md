@@ -5,19 +5,19 @@ Feature `--imagens` (PDF-only): extrai imagens embutidas como assets (ADR-0005).
 """
 import os
 import tempfile
-from dataclasses import dataclass
 from pathlib import Path
 
 import fitz  # PyMuPDF
 import pymupdf4llm
 
+from core.image_assets import ColetorAssets, ContextoAssets
 from core.image_converter import (
     _configurar_tesseract_cmd,
     alt_text_enxuto,
     image_to_md,
     ocr_bytes,
 )
-from core.pdf_images import ColetorAssets, extrair_imagens
+from core.pdf_images import extrair_imagens
 from core.utils import (
     _MAX_BYTES_RENDER_PAGINA,
     ModoImagem,
@@ -34,21 +34,6 @@ _OCR_DPI = 300
 # Margem vertical padrão (em % da altura da página) ignorada quando
 # --ignorar-margens está ativo. Cobre cabeçalhos e rodapés comuns.
 _MARGEM_PADRAO_PCT = 5.0
-
-
-@dataclass
-class _ContextoImagens:
-    """Estado da extração de imagens por documento (feature --imagens).
-
-    Um por chamada de pdf_to_md → seguro sob ThreadPoolExecutor.
-    """
-
-    modo: ModoImagem
-    coletor: ColetorAssets
-    assets_dir: Path      # onde os assets são gravados (D1)
-    md_dir: Path          # diretório do .md — base do link relativo
-    wikilinks: bool       # modo Obsidian: ![[nome]] em vez de ![](relativo)
-    avisos: list[str]     # avisos de extração (limites, falhas)
 
 
 def pdf_to_md(
@@ -104,7 +89,7 @@ def pdf_to_md(
     contexto = None
     if modo_imagem != ModoImagem.transcrever:
         dir_assets = assets_dir or (path.parent / f"{path.stem}_assets")
-        contexto = _ContextoImagens(
+        contexto = ContextoAssets(
             modo=modo_imagem,
             coletor=ColetorAssets(prefixo=prefixo_nome),
             assets_dir=dir_assets,
@@ -155,7 +140,7 @@ def _processar_pagina(
     num_pagina: int,
     chunks: list[dict],
     ignorar_margens: float,
-    contexto: _ContextoImagens | None = None,
+    contexto: ContextoAssets | None = None,
 ) -> str:
     """Extrai conteúdo de uma página: texto nativo (filtrado ou não) ou OCR."""
     pagina = doc.load_page(num_pagina)
@@ -211,7 +196,7 @@ def _texto_filtrado_margens(pagina: fitz.Page, margem_pct: float) -> str:
 
 
 def _ocr_pagina(
-    pagina: fitz.Page, num_pagina: int = 0, contexto: _ContextoImagens | None = None
+    pagina: fitz.Page, num_pagina: int = 0, contexto: ContextoAssets | None = None
 ) -> str:
     """Renderiza a página como imagem em alta resolução e aplica OCR.
 
@@ -237,10 +222,20 @@ def _ocr_pagina(
 
 
 def _persistir_render_pagina(
-    pix: fitz.Pixmap, num_pagina: int, contexto: _ContextoImagens, texto: str
+    pix: fitz.Pixmap, num_pagina: int, contexto: ContextoAssets, texto: str
 ) -> str:
-    """Persiste o render da página-scan (D3) e anexa o link ao MD."""
+    """Persiste o render da página-scan (D3) e anexa o link ao MD.
+
+    Renders contam no limite anti resource-bomb do documento (coletor):
+    um scan de 10k páginas não pode gravar 10k PNGs sem aviso.
+    """
     from core.pdf_images import caminho_seguro, preparar_assets_dir
+
+    if contexto.coletor.atingiu_limite():
+        contexto.avisos.append(
+            "limite de imagens por documento excedido — renders de páginas-scan interrompidos"
+        )
+        return texto
 
     dados = pix.tobytes("png")
     if len(dados) > _MAX_BYTES_RENDER_PAGINA:
@@ -256,12 +251,13 @@ def _persistir_render_pagina(
     nome = f"{contexto.coletor.prefixo}p{num_pagina + 1:03d}_full.png"
     caminho = caminho_seguro(dir_assets, nome)
     caminho.write_bytes(dados)
+    contexto.coletor.total += 1
 
     return texto.rstrip() + "\n\n" + _link_arquivo(nome, caminho, contexto, f"página {num_pagina + 1}")
 
 
 def _anexar_imagens_embutidas(
-    doc: fitz.Document, num_pagina: int, texto: str, contexto: _ContextoImagens
+    doc: fitz.Document, num_pagina: int, texto: str, contexto: ContextoAssets
 ) -> str:
     """Extrai as imagens da página e anexa os links ao final do MD."""
     assets, avisos = extrair_imagens(doc, num_pagina, contexto.assets_dir, contexto.coletor)
@@ -279,7 +275,7 @@ def _anexar_imagens_embutidas(
     return texto.rstrip() + "\n\n" + "\n\n".join(links)
 
 
-def _link_arquivo(nome: str, caminho_disco: Path, contexto: _ContextoImagens, alt: str) -> str:
+def _link_arquivo(nome: str, caminho_disco: Path, contexto: ContextoAssets, alt: str) -> str:
     """Monta o link do asset: wikilink Obsidian ou ![]() relativo ao MD (D1)."""
     if contexto.wikilinks:
         return f"![[{nome}]]"

@@ -412,3 +412,47 @@ def test_batch_docx_obsidian_wikilink(tmp_path):
     assert (vault / "attachments" / "nota__img_0001.png").exists()
     md = (vault / "nota.md").read_text(encoding="utf-8")
     assert "![[nota__img_0001.png]]" in md
+
+
+def test_batch_imagens_stem_colidido_nao_sobrescreve(tmp_path):
+    """Mesmo stem com extensões diferentes + --assets-dir: prefixos distintos.
+
+    Review Spec-3: o prefixo agora deriva do stem do .md destino (já único
+    via _nome_destino_unico), não do stem da origem — antes, `rel.pdf` +
+    `rel.docx` geravam prefixos idênticos e sobrescreviam assets.
+    """
+    import tempfile
+
+    from docx import Document
+    from PIL import Image
+
+    entrada = tmp_path / "entrada"
+    entrada.mkdir()
+
+    # PDF "rel" com imagem
+    _pdf_com_imagem_e_texto(entrada, "rel")
+    # DOCX "rel" com imagem
+    docx = Document()
+    docx.add_paragraph("Relatorio docx.")
+    p = docx.add_paragraph()
+    run = p.add_run()
+    img = Image.new("RGB", (30, 30), color=(150, 40, 40))
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+        img.save(tmp.name)
+        run.add_picture(tmp.name)
+    docx.save(str(entrada / "rel.docx"))
+
+    assets_globais = tmp_path / "assets_globais"
+    resultados = batch_convert(
+        origem=entrada,
+        destino=tmp_path / "saida",
+        workers=2,
+        modo_imagem=ModoImagem.extrair,
+        assets_dir=assets_globais,
+    )
+
+    assert all(r.status == StatusArquivo.CONCLUIDO for r in resultados)
+    arquivos = sorted(f.name for f in assets_globais.iterdir())
+    assert len(arquivos) == 2  # nenhum asset foi sobrescrito
+    # Ordenação: rel.docx → rel.md (prefixo rel__), rel.pdf → rel-pdf.md
+    assert arquivos == ["rel-pdf__img_p001_0.png", "rel__img_0001.png"]

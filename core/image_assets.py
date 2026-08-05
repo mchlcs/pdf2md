@@ -15,7 +15,11 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from core.utils import _MAX_BYTES_IMAGEM
+from core.utils import (
+    _MAX_BYTES_IMAGEM,
+    _MAX_IMAGENS_PDF,
+    ModoImagem,
+)
 
 # Nome de asset: só ASCII seguro — gerado, nunca derivado de metadado.
 _RE_NOME_SEGURO = re.compile(r"^[A-Za-z0-9._-]+$")
@@ -44,13 +48,35 @@ class ColetorAssets:
     Estado da extração por documento.
 
     Vive por chamada de conversão (thread-safe: o batch cria um por
-    arquivo). `total` conta imagens processadas (inclusive duplicatas) —
-    é o limite anti resource-bomb do documento.
+    arquivo). `total` conta assets gravados/processados (inclusive
+    duplicatas e renders de página-scan) — é o limite anti resource-bomb
+    do documento.
     """
 
     prefixo: str = ""
     cache: dict[str, AssetImagem] = field(default_factory=dict)
     total: int = 0
+
+    def atingiu_limite(self) -> bool:
+        """True quando o documento atingiu _MAX_IMAGENS_PDF assets."""
+        return self.total >= _MAX_IMAGENS_PDF
+
+
+@dataclass
+class ContextoAssets:
+    """
+    Estado da extração de assets por documento — forma única compartilhada
+    por pdf_to_md (converter.py) e doc_to_md (doc_converter.py).
+
+    Um por chamada de conversão → seguro sob ThreadPoolExecutor.
+    """
+
+    modo: ModoImagem
+    coletor: ColetorAssets
+    assets_dir: Path      # onde os assets são gravados (D1)
+    md_dir: Path          # diretório do .md — base do link relativo
+    wikilinks: bool       # modo Obsidian: ![[nome]] em vez de ![](relativo)
+    avisos: list[str]     # avisos de extração (limites, falhas)
 
 
 def gerar_nome(prefixo: str, base: str, extensao: str) -> str:
@@ -102,7 +128,12 @@ def registrar_asset(
     Registra um asset no coletor: dedup (D4) + limites + escrita.
 
     O limite de imagens POR DOCUMENTO é responsabilidade do chamador
-    (tem controle de loop; aqui só o limite por bytes é aplicado).
+    (via `ColetorAssets.atingiu_limite()` — tem controle de loop; aqui só
+    o limite por bytes é aplicado).
+
+    A referência no cache NÃO retém os bytes (memória limitada a nomes e
+    paths, mesmo com 500 assets de 50 MB) — `dados` só interessa a quem
+    acaba de extrair (OCR do alt-text), nunca a duplicatas.
 
     Args:
         assets_dir: Diretório de destino (validado pelo chamador).
@@ -125,13 +156,13 @@ def registrar_asset(
 
     chave = hashlib.sha256(dados).hexdigest()
     if chave in coletor.cache:
-        # D4: mesmo conteúdo → mesmo arquivo, link adicional
-        asset = coletor.cache[chave]
+        # D4: mesmo conteúdo → mesmo arquivo, link adicional (sem bytes)
+        ref = coletor.cache[chave]
         return AssetImagem(
-            nome=asset.nome,
-            extensao=asset.extensao,
-            dados=asset.dados,
-            caminho_disco=asset.caminho_disco,
+            nome=ref.nome,
+            extensao=ref.extensao,
+            dados=b"",
+            caminho_disco=ref.caminho_disco,
             duplicado=True,
         ), None
 
@@ -139,12 +170,17 @@ def registrar_asset(
     caminho = caminho_seguro(assets_dir, nome)
     caminho.write_bytes(dados)
 
-    asset = AssetImagem(
+    # Cache sem bytes — referência leve para futuras duplicatas
+    coletor.cache[chave] = AssetImagem(
+        nome=nome,
+        extensao=extensao,
+        dados=b"",
+        caminho_disco=caminho,
+    )
+    coletor.total += 1
+    return AssetImagem(
         nome=nome,
         extensao=extensao,
         dados=dados,
         caminho_disco=caminho,
-    )
-    coletor.cache[chave] = asset
-    coletor.total += 1
-    return asset, None
+    ), None
