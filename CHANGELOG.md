@@ -14,6 +14,10 @@ Versioning follows [SemVer](https://semver.org/).
   `pdf2md converter ...` continua). Auditado por Grok 4.5 max (C1).
 - **GUI: avisos de qualidade eram descartados** — `atualizarProgresso`
   não propagava `item.avisos`; o ícone âmbar nunca aparecia (A1).
+- **`--imagens`: crash em `ambos` com GIF/PPM** (ocr_bytes normaliza para
+  PNG); **renders de scan contam no limite anti bomb**; **colisão de stem
+  em dirs de assets compartilhados** (prefixo pelo stem do .md destino) —
+  fixes da Emenda 2 do ADR-0005 (#22/cf9ab44).
 
 ### Added
 

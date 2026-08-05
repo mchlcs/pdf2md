@@ -44,3 +44,10 @@
 - `[2026-05-29] DECISION` **Code-review max-effort** (5 finders + verify + sweep) é gate pré-release obrigatório, não faxina posterior. ROI comprovado: 15/15 bugs capturados.
 - `[2026-05-29] DECISION` **Nova dep externa via subprocess** → `grep subprocess.run core/` + comparação com resolvers existentes antes de empacotar.
 - `[2026-05-29] PATTERN` Distinguir falha ambiental de regressão: validar contra base limpo (`git stash`) antes de culpar a mudança.
+
+## 2026-08-05 — Ciclo de auditoria (Grok 4.5 max)
+- **Push direto em main é bloqueado pela branch protection** (CLAUDE.md PR-only) — o commit `4572299 chore: uv.lock` passou por bypass reportado; registrar e nunca repetir.
+- **Typer 0.26 usa click vendored** — `invoke_without_command` não funciona como no click clássico (resolve_command falha em args desconhecidos). Default-command deve ser resolvido no entry point (shim `core.cli:main`).
+- **PyInstaller executa o módulo como `__main__`** — guards `if __name__` precisam ficar no FIM do módulo (no topo, rodavam antes do `add_typer`).
+- **`.secrets.baseline` vazio quebra o CI detect-secrets** — falsos positivos intencionais (URLs de exemplo em ADR/testes) devem ser auditados e baselined.
+- **Bug CLI/GUI durou 2 releases (v0.4.0→v0.6.0)**: o `.app` nunca converteu — o smoke de empacotamento com os args EXATOS da GUI agora roda no CI.

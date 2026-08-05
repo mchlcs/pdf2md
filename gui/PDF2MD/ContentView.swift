@@ -168,8 +168,6 @@ struct ContentView: View {
                 .resizable()
                 .frame(width: 32, height: 32)
                 .clipShape(RoundedRectangle(cornerRadius: 7))
-            Text("pdf2md")
-                .font(.headline)
             Spacer()
         }
         .padding(.horizontal, 16)
