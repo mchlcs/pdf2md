@@ -28,6 +28,14 @@ struct ContentView: View {
         )
     }
 
+    // Piso da lista de arquivos (~5 linhas). Sem teto: a lista é elástica e
+    // absorve todo o espaço livre da janela.
+    private static let alturaMinimaLista: CGFloat = 160
+    // Zona de arrastar: expande quando não há arquivos (ocupa o espaço que a
+    // lista ainda não usa e aumenta o alvo de drop), encolhe quando há.
+    private static let alturaArrastarVazia: CGFloat = 280
+    private static let alturaArrastarCompacta: CGFloat = 110
+
     // Tipos permitidos no picker — calculado uma vez (fix: eficiência + UTI canônicas)
     private static let tiposPermitidos: [UTType] = {
         var tipos: [UTType] = [.pdf, .png, .jpeg, .tiff, .bmp, .heic]
@@ -68,78 +76,88 @@ struct ContentView: View {
 
             Divider()
 
-            ScrollView {
-                VStack(spacing: 16) {
-                    // Zona drag-drop + ações
-                    zonaArrastar
-                        .padding(.top, 16)
+            // Topo fixo: zona de drop + botões de adicionar
+            VStack(spacing: 16) {
+                zonaArrastar
+                    .padding(.top, 16)
 
-                    botoesAdicionarArquivos
+                botoesAdicionarArquivos
+            }
+            .padding(.horizontal, 16)
 
-                    // Lista de arquivos
-                    if !arquivosSelecionados.isEmpty {
-                        listaArquivos
-                    }
+            // Lista de arquivos — área elástica: absorve todo o espaço que sobra
+            // e cresce ao redimensionar a janela. A List rola internamente, então
+            // não precisa de ScrollView externo (que a limitaria à altura intrínseca).
+            if !arquivosSelecionados.isEmpty {
+                listaArquivos
+                    .padding(.horizontal, 16)
+                    .padding(.top, 16)
+            } else {
+                Spacer(minLength: 0)
+            }
 
-                    // Saída / Vault (campo unificado)
-                    campoCaminho
+            // Rodapé ancorado: os controles de conversão nunca saem da tela,
+            // independente de quantos arquivos estejam na lista.
+            VStack(spacing: 16) {
+                // Saída / Vault (campo unificado)
+                campoCaminho
 
-                    // Toggles: Obsidian + LLM fallback
-                    GroupBox {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Toggle("Modo Obsidian", isOn: $modoObsidian)
-                                .onChange(of: modoObsidian) { _ in
-                                    caminho = nil  // limpa ao trocar modo
-                                }
-                                .disabled(processador.estaProcessando)
-
-                            Divider()
-
-                            Toggle(isOn: $modoLLM) {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Label("⚡ Melhorar com IA (fallback)", systemImage: "sparkles")
-                                        .font(.body)
-                                    Text(llmConfigurado
-                                         ? "Usa o provedor configurado quando a qualidade está baixa."
-                                         : "Configure provedor, modelo e chave nas Preferências…")
-                                        .font(.caption2)
-                                        .foregroundColor(.secondary)
-                                }
+                // Toggles: Obsidian + LLM fallback
+                GroupBox {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Toggle("Modo Obsidian", isOn: $modoObsidian)
+                            .onChange(of: modoObsidian) { _ in
+                                caminho = nil  // limpa ao trocar modo
                             }
-                            .disabled(processador.estaProcessando || !llmConfigurado)
+                            .disabled(processador.estaProcessando)
 
-                            if !llmConfigurado {
-                                Button("Abrir Preferências…") {
-                                    // macOS 13: abre a scene `Settings`
-                                    NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-                                }
-                                .buttonStyle(.link)
-                                .controlSize(.small)
+                        Divider()
+
+                        Toggle(isOn: $modoLLM) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Label("⚡ Melhorar com IA (fallback)", systemImage: "sparkles")
+                                    .font(.body)
+                                Text(llmConfigurado
+                                     ? "Usa o provedor configurado quando a qualidade está baixa."
+                                     : "Configure provedor, modelo e chave nas Preferências…")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
                             }
                         }
+                        .disabled(processador.estaProcessando || !llmConfigurado)
+
+                        if !llmConfigurado {
+                            Button("Abrir Preferências…") {
+                                // macOS 13: abre a scene `Settings`
+                                NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+                            }
+                            .buttonStyle(.link)
+                            .controlSize(.small)
+                        }
                     }
-
-                    // Botões de ação
-                    botoesAcao
-
-                    // Progresso
-                    if processador.estaProcessando {
-                        barraProgresso
-                    }
-
-                    // Tempo total ao concluir
-                    if processador.concluido, let t = processador.duracaoTotal {
-                        Text("Concluído em \(BatchProcessor.formatarDuracao(t))")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-
-                    Spacer(minLength: 16)
                 }
-                .padding(.horizontal, 16)
+
+                // Botões de ação
+                botoesAcao
+
+                // Progresso
+                if processador.estaProcessando {
+                    barraProgresso
+                }
+
+                // Tempo total ao concluir
+                if processador.concluido, let t = processador.duracaoTotal {
+                    Text("Concluído em \(BatchProcessor.formatarDuracao(t))")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
             }
+            .padding(.horizontal, 16)
+            .padding(.top, 16)
+            .padding(.bottom, 16)
         }
-        .frame(minWidth: 480, minHeight: 420)
+        // Altura mínima cobre topo + rodapé fixos + uma lista utilizável.
+        .frame(minWidth: 480, minHeight: 640)
         // Alert com mensagem dinâmica — distingue clipboard vazio de erro de I/O
         .alert(
             "Erro ao colar imagem",
@@ -193,6 +211,10 @@ struct ContentView: View {
         }
     }
 
+    private var alturaZonaArrastar: CGFloat {
+        arquivosSelecionados.isEmpty ? Self.alturaArrastarVazia : Self.alturaArrastarCompacta
+    }
+
     private var zonaArrastar: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 12)
@@ -204,7 +226,7 @@ struct ContentView: View {
                     RoundedRectangle(cornerRadius: 12)
                         .fill(isDragOver ? Color.accentColor.opacity(0.08) : Color.clear)
                 )
-                .frame(height: 110)
+                .frame(height: alturaZonaArrastar)
 
             VStack(spacing: 6) {
                 Image(systemName: "doc.badge.arrow.up")
@@ -249,7 +271,9 @@ struct ContentView: View {
                 }
             }
             .listStyle(.plain)
-            .frame(height: min(CGFloat(arquivosSelecionados.count) * 32, 160))
+            // Elástica: nunca menor que ~5 linhas, cresce até ocupar todo o espaço
+            // livre da janela. Sem teto fixo — redimensionar a janela aumenta a lista.
+            .frame(minHeight: Self.alturaMinimaLista, maxHeight: .infinity)
         }
     }
 
