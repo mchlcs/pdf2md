@@ -8,5 +8,10 @@ struct PDF2MDApp: App {
         WindowGroup("pdf2md") {
             ContentView()
         }
+        // Config do LLM fica em Preferências (Parte 5 do plano: o rodapé
+        // é ancorado e o provider/modelo não é decisão por conversão).
+        Settings {
+            SettingsView()
+        }
     }
 }

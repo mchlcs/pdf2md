@@ -13,6 +13,21 @@ struct ContentView: View {
     @State private var tarefaConversao: Task<Void, Never>?
     @State private var erroColagem: String? = nil  // nil = sem alert; non-nil = mensagem exibida
 
+    // Config do LLM (Preferências) — @AppStorage espelha SettingsView
+    @AppStorage(LLMDefaultsKeys.provider) private var llmProviderRaw = LLMProvider.ollama.rawValue
+    @AppStorage(LLMDefaultsKeys.modelo) private var llmModelo = ""
+    @AppStorage(LLMDefaultsKeys.urlPersonalizada) private var llmUrlPersonalizada = ""
+
+    /// True quando há provider + key + modelo suficientes para o LLM (D10).
+    private var llmConfigurado: Bool {
+        LLMProvider.configurado(
+            providerRaw: llmProviderRaw,
+            urlPersonalizada: llmUrlPersonalizada,
+            chave: KeychainHelper.ler(),
+            modelo: llmModelo
+        )
+    }
+
     // Tipos permitidos no picker — calculado uma vez (fix: eficiência + UTI canônicas)
     private static let tiposPermitidos: [UTType] = {
         var tipos: [UTType] = [.pdf, .png, .jpeg, .tiff, .bmp, .heic]
@@ -84,12 +99,23 @@ struct ContentView: View {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Label("⚡ Melhorar com IA (fallback)", systemImage: "sparkles")
                                         .font(.body)
-                                    Text("Usa LLM local (Ollama) quando qualidade baixa. Requer PDF2MD_LLM_URL.")
+                                    Text(llmConfigurado
+                                         ? "Usa o provedor configurado quando a qualidade está baixa."
+                                         : "Configure provedor, modelo e chave nas Preferências…")
                                         .font(.caption2)
                                         .foregroundColor(.secondary)
                                 }
                             }
-                            .disabled(processador.estaProcessando)
+                            .disabled(processador.estaProcessando || !llmConfigurado)
+
+                            if !llmConfigurado {
+                                Button("Abrir Preferências…") {
+                                    // macOS 13: abre a scene `Settings`
+                                    NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+                                }
+                                .buttonStyle(.link)
+                                .controlSize(.small)
+                            }
                         }
                     }
 
@@ -414,7 +440,14 @@ struct ContentView: View {
                 destino: modoObsidian ? nil : destino,
                 vault: modoObsidian ? destino : nil,
                 obsidian: modoObsidian,
-                llmFallback: modoLLM
+                llmFallback: modoLLM,
+                llmURL: LLMProvider.urlResolvida(
+                    providerRaw: llmProviderRaw,
+                    urlPersonalizada: llmUrlPersonalizada
+                ),
+                llmModelo: llmModelo.trimmingCharacters(in: .whitespaces).isEmpty
+                    ? nil : llmModelo,
+                llmKey: KeychainHelper.ler()
             )
         }
     }

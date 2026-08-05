@@ -218,3 +218,37 @@ def test_aplicar_pipeline_sem_llm_por_padrao(tmp_path):
     resultado, avisos = aplicar_pipeline_qualidade(md, f, usar_llm=False, llm_fallback=False)
     assert isinstance(avisos, list)
     assert len(avisos) > 0  # detecta U+FFFD
+
+
+def test_pipeline_repassa_config_llm(tmp_path):
+    """llm_config do pipeline chega intacto ao disponivel/melhorar_markdown.
+
+    É o elo entre as flags --llm-url/--llm-modelo e o enhancer: sem isto,
+    a precedência flag > env se perde no caminho batch → quality.
+    """
+    from unittest.mock import patch
+
+    from core.llm_enhancer import ConfigLLM
+
+    f = tmp_path / "doc.pdf"
+    f.write_bytes(b"%PDF" + b"x" * 5000)
+    md = "texto com \ufffd\ufffd corrompido"  # U+FFFD sobrevive à limpeza → avisos
+    config = ConfigLLM(url="http://localhost:11434/v1", modelo="llama3.2-vision")
+    recebidos = []
+
+    def fake_disponivel(c=None):
+        recebidos.append(("disponivel", c))
+        return True
+
+    def fake_melhorar(texto, origem, c=None):
+        recebidos.append(("melhorar", c))
+        return texto, []
+
+    with (
+        patch("core.llm_enhancer.disponivel", side_effect=fake_disponivel),
+        patch("core.llm_enhancer.melhorar_markdown", side_effect=fake_melhorar),
+    ):
+        aplicar_pipeline_qualidade(md, f, llm_fallback=True, llm_config=config)
+
+    assert len(recebidos) == 2
+    assert all(c is config for _, c in recebidos)

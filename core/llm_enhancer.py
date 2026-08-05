@@ -4,7 +4,8 @@ LLM enhancer — fallback de qualidade via modelo local (Ollama) ou remoto.
 Provider-agnostic: usa API compatível com OpenAI via urllib.request (stdlib,
 sem deps extras). Funciona com Ollama, Gemini, OpenRouter, Groq etc.
 
-Configuração via variáveis de ambiente:
+Configuração por precedência: flag CLI (ConfigLLM) > variável de ambiente > default:
+
   PDF2MD_LLM_URL    URL base da API  (default: http://localhost:11434/v1 = Ollama)
   PDF2MD_LLM_KEY    API key          (default: "ollama" — Ollama não valida)
   PDF2MD_LLM_MODEL  Modelo           (default: llama3.2-vision)
@@ -29,9 +30,13 @@ Exemplos de configuração:
 import base64
 import json
 import os
+import time
+import urllib.error
 import urllib.request
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+from typing import TypedDict
 from urllib.parse import urlsplit
 
 # ── Configuração ──────────────────────────────────────────────────────────────
@@ -42,15 +47,44 @@ _TIMEOUT_PADRAO = 120
 _MAX_CHARS_LLM = 12000       # ~3k tokens — evita estourar contexto do modelo
 _MAX_TOKENS_RESPOSTA = 4096
 _TIMEOUT_VERIFICACAO = 2     # segundos — timeout rápido para checagem de disponibilidade
+_TIMEOUT_MODELOS = 10        # segundos — timeout para listagem de modelos
 
 # Schemes aceitos para a URL do LLM — bloqueia file://, ftp://, gopher:// etc.
 # que permitiriam SSRF/leitura arbitrária de arquivo via urlopen (CWE-918).
 _SCHEMES_PERMITIDOS = frozenset({"http", "https"})
 
 
-def _url() -> str:
+@dataclass(frozen=True)
+class ConfigLLM:
     """
-    Lê e valida PDF2MD_LLM_URL.
+    Configuração do LLM com precedência flag > env > default.
+
+    Campos None = não configurado pela flag → cai no env (ou no default).
+    A API key nunca deve vir de argv: chega via environment (GUI) ou
+    PDF2MD_LLM_KEY — argv aparece em `ps aux` (CWE-522).
+    """
+
+    url: str | None = None
+    modelo: str | None = None
+    key: str | None = None
+
+
+class ModeloLLMInfo(TypedDict):
+    """Item da lista de modelos — id do modelo + capacidade de visão."""
+    id: str
+    visao: bool | None
+
+
+class ResultadoTeste(TypedDict):
+    """Resultado do probe de conexão — campos sempre presentes no JSON."""
+    ok: bool
+    latencia_ms: int | None
+    erro: str | None
+
+
+def _url(config: ConfigLLM | None = None) -> str:
+    """
+    Resolve a URL do LLM (flag > env > default) e valida.
 
     Aplica allowlist de scheme (http/https) e rejeita credenciais embutidas
     na URL (user:pass@host) — mitigação de SSRF (CWE-918) e de leak de
@@ -62,7 +96,11 @@ def _url() -> str:
     Raises:
         ValueError: Se scheme não permitido, host vazio ou houver userinfo.
     """
-    bruta = os.getenv("PDF2MD_LLM_URL", _URL_PADRAO).rstrip("/")
+    if config is not None and config.url:
+        bruta = config.url
+    else:
+        bruta = os.getenv("PDF2MD_LLM_URL", _URL_PADRAO)
+    bruta = bruta.rstrip("/")
     partes = urlsplit(bruta)
 
     if partes.scheme not in _SCHEMES_PERMITIDOS:
@@ -75,11 +113,15 @@ def _url() -> str:
     return bruta
 
 
-def _modelo() -> str:
+def _modelo(config: ConfigLLM | None = None) -> str:
+    if config is not None and config.modelo:
+        return config.modelo
     return os.getenv("PDF2MD_LLM_MODEL", _MODELO_PADRAO)
 
 
-def _key() -> str:
+def _key(config: ConfigLLM | None = None) -> str:
+    if config is not None and config.key:
+        return config.key
     return os.getenv("PDF2MD_LLM_KEY", "ollama")
 
 
@@ -113,39 +155,77 @@ Transcreva todo o texto visível nesta imagem para Markdown.
 
 # ── Cliente HTTP (stdlib — sem deps extras) ───────────────────────────────────
 
+_HEADERS_BASE = {"Content-Type": "application/json"}
 
-def _completar(mensagens: list[dict]) -> str:
+
+def _cabecalhos_auth(config: ConfigLLM | None) -> dict[str, str]:
+    """Cabeçalho de autorização — a key viaja no header, nunca em argv/log."""
+    return {**_HEADERS_BASE, "Authorization": f"Bearer {_key(config)}"}
+
+
+def _completar(mensagens: list[dict], config: ConfigLLM | None = None) -> str:
     """
     Chama /chat/completions via urllib.request (sem deps extras).
     Compatível com qualquer API no formato OpenAI.
     """
     payload = json.dumps({
-        "model": _modelo(),
+        "model": _modelo(config),
         "messages": mensagens,
         "max_tokens": _MAX_TOKENS_RESPOSTA,
         "temperature": 0.1,
     }).encode("utf-8")
 
     req = urllib.request.Request(
-        f"{_url()}/chat/completions",
+        f"{_url(config)}/chat/completions",
         data=payload,
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {_key()}",
-        },
+        headers=_cabecalhos_auth(config),
         method="POST",
     )
 
     with urllib.request.urlopen(req, timeout=_timeout()) as resp:
         data = json.loads(resp.read().decode("utf-8"))
 
-    return data["choices"][0]["message"]["content"]
+    conteudo = data["choices"][0]["message"]["content"]
+    if not isinstance(conteudo, str):
+        # Não usa assert: some sob `python -O` e o contrato exige str.
+        raise TypeError("resposta do LLM em formato inesperado")
+    return conteudo
+
+
+def _erro_seguro(exc: Exception) -> str:
+    """
+    Mensagem de erro sem detalhes sensíveis (CWE-209/532).
+
+    Não inclui URL, credencial, path do ambiente nem a mensagem bruta da
+    exceção — só código HTTP ou categoria do problema.
+    """
+    if isinstance(exc, urllib.error.HTTPError):
+        return f"HTTP {exc.code}"
+    if isinstance(exc, TimeoutError):
+        return "timeout"
+    if isinstance(exc, urllib.error.URLError):
+        return "servidor inacessível"
+    return type(exc).__name__
+
+
+def _get_models(config: ConfigLLM | None, timeout: int) -> dict | None:
+    """
+    GET {url}/models com auth — shape único compartilhado por
+    disponivel()/testar()/listar_modelos() (sem triplicação de Request).
+    Devolve o JSON do endpoint ou None se a resposta não for dict.
+    """
+    req = urllib.request.Request(
+        f"{_url(config)}/models", method="GET", headers=_cabecalhos_auth(config)
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        dados = json.loads(resp.read().decode("utf-8"))
+    return dados if isinstance(dados, dict) else None
 
 
 # ── API pública ───────────────────────────────────────────────────────────────
 
 @lru_cache(maxsize=1)
-def disponivel() -> bool:
+def disponivel(config: ConfigLLM | None = None) -> bool:
     """
     Verifica se o endpoint LLM está acessível (timeout rápido de 2s).
 
@@ -156,23 +236,122 @@ def disponivel() -> bool:
         True se o endpoint respondeu. False se não configurado ou inacessível.
     """
     try:
-        url = _url()
+        url = _url(config)
     except ValueError:
         # URL malformada/insegura — trata como indisponível, não propaga.
         return False
-    # Se usar o default e PDF2MD_LLM_URL não estiver definido, só testa se
-    # explicitamente configurado — evita timeout em máquinas sem Ollama.
-    if url == _URL_PADRAO and "PDF2MD_LLM_URL" not in os.environ:
+    # Se a URL efetiva é o default e nada a configurou explicitamente
+    # (nem flag, nem env), não testa — evita timeout em máquinas sem Ollama.
+    url_explicita = (config.url if config is not None else None) or os.getenv("PDF2MD_LLM_URL")
+    if url == _URL_PADRAO and url_explicita is None:
         return False
     try:
-        req = urllib.request.Request(f"{url}/models", method="GET")
-        with urllib.request.urlopen(req, timeout=_TIMEOUT_VERIFICACAO):
-            return True
+        return _get_models(config, _TIMEOUT_VERIFICACAO) is not None
     except Exception:
         return False
 
 
-def melhorar_markdown(md: str, origem: Path) -> tuple[str, list[str]]:
+def testar(config: ConfigLLM | None = None) -> ResultadoTeste:
+    """
+    Prova de disponibilidade SEM cache, com latência medida.
+
+    Uso: subcomando `pdf2md llm testar --json` (GUI) e diagnóstico manual.
+
+    Returns:
+        {"ok": bool, "latencia_ms": int | None, "erro": str | None}
+        — "erro" é mensagem segura (CWE-209), nunca a exceção bruta.
+    """
+    try:
+        _url(config)  # valida antes de medir (SSRF/CWE-918)
+    except ValueError as exc:
+        return {"ok": False, "latencia_ms": None, "erro": str(exc)}
+
+    inicio = time.perf_counter()
+    try:
+        dados = _get_models(config, _TIMEOUT_VERIFICACAO)
+        latencia_ms = int((time.perf_counter() - inicio) * 1000)
+        if dados is None:
+            return {"ok": False, "latencia_ms": None, "erro": "resposta inesperada"}
+        return {"ok": True, "latencia_ms": latencia_ms, "erro": None}
+    except Exception as exc:
+        return {"ok": False, "latencia_ms": None, "erro": _erro_seguro(exc)}
+
+
+def _base_ollama(url: str) -> str | None:
+    """Deriva a base da API nativa do Ollama da URL OpenAI-compat.
+
+    "http://localhost:11434/v1" → "http://localhost:11434".
+    Só para hosts locais — não assume API nativa em servidor remoto.
+    """
+    host = urlsplit(url).hostname or ""
+    if host not in ("localhost", "127.0.0.1") or not url.endswith("/v1"):
+        return None
+    return url[:-3]
+
+
+def _visao_modelo(modelo_id: str, url: str) -> bool | None:
+    """
+    Detecta se o modelo tem visão (para o picker da GUI).
+
+    Ollama local: `GET /api/show` expõe a flag `vision` no model_info.
+    Outros providers: sem fonte confiável → None (desconhecido); o preset
+    do provider na GUI cobre o padrão (ex: Groq = sem visão).
+    """
+    base = _base_ollama(url)
+    if base is None:
+        return None
+    try:
+        payload = json.dumps({"name": modelo_id}).encode("utf-8")
+        req = urllib.request.Request(
+            f"{base}/api/show",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=_TIMEOUT_MODELOS) as resp:
+            info = json.loads(resp.read().decode("utf-8"))
+        mi = info.get("model_info") or {}
+        if "vision" in mi:
+            return bool(mi["vision"])
+        return bool(info["vision"]) if "vision" in info else None
+    except Exception:
+        return None
+
+
+def listar_modelos(
+    config: ConfigLLM | None = None,
+) -> tuple[list[ModeloLLMInfo] | None, str | None]:
+    """
+    Lista os modelos disponíveis no endpoint (GET /models).
+
+    Cada item: {"id": str, "visao": bool | None} — "visao" é True/False
+    quando detectável (Ollama local) e None quando desconhecido.
+
+    Returns:
+        (modelos, erro) — modelos é None se a chamada falhou; "erro" é
+        mensagem segura (CWE-209), nunca a exceção bruta.
+    """
+    try:
+        url = _url(config)
+    except ValueError as exc:
+        return None, str(exc)
+
+    try:
+        dados = _get_models(config, _TIMEOUT_MODELOS)
+        if dados is None:
+            return None, "resposta inesperada"
+        ids = sorted(
+            item["id"] for item in dados.get("data", []) if item.get("id")
+        )
+        modelos = [ModeloLLMInfo(id=i, visao=_visao_modelo(i, url)) for i in ids]
+        return modelos, None
+    except Exception as exc:
+        return None, _erro_seguro(exc)
+
+
+def melhorar_markdown(
+    md: str, origem: Path, config: ConfigLLM | None = None
+) -> tuple[str, list[str]]:
     """
     Melhora qualidade do Markdown via LLM (pós-processamento de texto).
 
@@ -185,6 +364,7 @@ def melhorar_markdown(md: str, origem: Path) -> tuple[str, list[str]]:
     Args:
         md: Markdown bruto (já limpo por quality.py).
         origem: Path do arquivo de origem (para contexto no prompt).
+        config: ConfigLLM opcional (flag > env > default).
 
     Returns:
         (md_melhorado, avisos_adicionais) — avisos_adicionais é [] se OK.
@@ -194,7 +374,7 @@ def melhorar_markdown(md: str, origem: Path) -> tuple[str, list[str]]:
     prompt = _PROMPT_MELHORIA.format(nome=origem.name, md=md_input)
 
     try:
-        resultado = _completar([{"role": "user", "content": prompt}])
+        resultado = _completar([{"role": "user", "content": prompt}], config)
         if len(md) > _MAX_CHARS_LLM:
             resultado = resultado + "\n\n" + md[_MAX_CHARS_LLM:]
         return resultado, []
@@ -204,7 +384,9 @@ def melhorar_markdown(md: str, origem: Path) -> tuple[str, list[str]]:
         return md, [f"LLM enhancement falhou ({type(exc).__name__})"]
 
 
-def ocr_com_visao(imagem_path: Path) -> tuple[str, list[str]]:
+def ocr_com_visao(
+    imagem_path: Path, config: ConfigLLM | None = None
+) -> tuple[str, list[str]]:
     """
     Transcreve imagem usando visão do LLM (OCR fallback).
 
@@ -215,6 +397,7 @@ def ocr_com_visao(imagem_path: Path) -> tuple[str, list[str]]:
 
     Args:
         imagem_path: Path para arquivo de imagem (PNG recomendado).
+        config: ConfigLLM opcional (flag > env > default).
 
     Returns:
         (texto_md, avisos) — avisos é [] se OCR com visão foi bem-sucedido.
@@ -236,7 +419,7 @@ def ocr_com_visao(imagem_path: Path) -> tuple[str, list[str]]:
             ],
         }
 
-        resultado = _completar([mensagem_visao])
+        resultado = _completar([mensagem_visao], config)
         return resultado, []
     except Exception as exc:
         # Idem: não inclui str(exc) no aviso (CWE-209/532).

@@ -27,6 +27,10 @@ de mojibake não consegue mais detectar.
 """
 import re
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from core.llm_enhancer import ConfigLLM
 
 # ── Tabela de mojibake PT-BR (gerada programaticamente) ─────────────────────
 # Mojibake ocorre quando texto Latin-1/cp1252 é decodificado como UTF-8.
@@ -204,6 +208,7 @@ def aplicar_pipeline_qualidade(
     origem: Path,
     usar_llm: bool = False,
     llm_fallback: bool = False,
+    llm_config: "ConfigLLM | None" = None,
 ) -> tuple[str, list[str]]:
     """
     Aplica o pipeline completo de qualidade ao Markdown extraído.
@@ -219,6 +224,7 @@ def aplicar_pipeline_qualidade(
         origem: Path do arquivo de origem (para contexto no LLM e validar_qualidade).
         usar_llm: Se True, sempre aplica LLM (--llm).
         llm_fallback: Se True, aplica LLM só quando há avisos (--llm-fallback).
+        llm_config: ConfigLLM opcional (precedência flag > env > default).
 
     Returns:
         (md_tratado, avisos) — avisos é lista vazia se qualidade OK.
@@ -232,8 +238,8 @@ def aplicar_pipeline_qualidade(
         from core.llm_enhancer import disponivel as llm_disponivel
         from core.llm_enhancer import melhorar_markdown
 
-        if llm_disponivel():
-            md, avisos_llm = melhorar_markdown(md, origem)
+        if llm_disponivel(llm_config):
+            md, avisos_llm = melhorar_markdown(md, origem, llm_config)
             avisos = validar_qualidade(md, origem) + avisos_llm
         elif usar_llm:
             avisos.append(

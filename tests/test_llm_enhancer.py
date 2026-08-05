@@ -3,11 +3,20 @@ Testes para core/llm_enhancer.py.
 Todos os testes são mockados — nenhum requer Ollama ou API key real.
 """
 import json
+import os
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from core.llm_enhancer import _url, disponivel, melhorar_markdown, ocr_com_visao
+from core.llm_enhancer import (
+    ConfigLLM,
+    _url,
+    disponivel,
+    listar_modelos,
+    melhorar_markdown,
+    ocr_com_visao,
+    testar,
+)
 
 # ── Helper: mock de resposta HTTP ────────────────────────────────────────────
 
@@ -135,11 +144,9 @@ def test_disponivel_false_sem_env():
 
 
 def test_disponivel_true_quando_endpoint_responde():
-    """Retorna True quando endpoint acessível."""
+    """Retorna True quando endpoint acessível (GET /models com JSON válido)."""
     disponivel.cache_clear()
-    mock_resp = MagicMock()
-    mock_resp.__enter__ = lambda s: s
-    mock_resp.__exit__ = MagicMock(return_value=False)
+    mock_resp = _mock_models_response([])
     with (
         patch.dict("os.environ", {"PDF2MD_LLM_URL": "http://localhost:11434/v1"}),
         patch("urllib.request.urlopen", return_value=mock_resp),
@@ -278,3 +285,197 @@ def test_ocr_com_visao_encoda_imagem_em_base64(tmp_path):
     import base64
     b64_esperado = base64.standard_b64encode(conteudo).decode("ascii")
     assert b64_esperado in payloads[0]
+
+
+# ── ConfigLLM: precedência flag > env > default (T8) ─────────────────────────
+
+def test_url_config_precedencia_sobre_env():
+    """ConfigLLM.url vence PDF2MD_LLM_URL (flag > env)."""
+    with patch.dict("os.environ", {"PDF2MD_LLM_URL": "https://api.exemplo.com/v1"}):
+        assert _url(ConfigLLM(url="http://localhost:11434/v1")) == "http://localhost:11434/v1"
+
+
+def test_url_config_vazio_cai_no_env():
+    """ConfigLLM() sem url preserva o comportamento env-only."""
+    with patch.dict("os.environ", {"PDF2MD_LLM_URL": "https://api.exemplo.com/v1"}):
+        assert _url(ConfigLLM(modelo="x")) == "https://api.exemplo.com/v1"
+        assert _url() == "https://api.exemplo.com/v1"
+
+
+def test_url_sem_env_nem_config_usa_default():
+    """Sem env e sem config → default Ollama."""
+    with patch.dict("os.environ", {}, clear=True):
+        assert _url() == "http://localhost:11434/v1"
+
+
+def test_config_url_insegura_rejeitada():
+    """ConfigLLM.url passa pela MESMA validação que o env (SSRF)."""
+    with pytest.raises(ValueError, match="http ou https"):
+        _url(ConfigLLM(url="file:///etc/passwd"))
+
+
+def test_melhorar_markdown_usa_url_e_modelo_do_config(tmp_path):
+    """URL e modelo do ConfigLLM chegam à requisição real."""
+    f = tmp_path / "doc.pdf"
+    f.write_bytes(b"x")
+
+    requisicoes = []
+
+    def capturar(req, timeout=None):
+        requisicoes.append(req)
+        return _mock_response("melhorado")
+
+    config = ConfigLLM(url="http://localhost:11434/v1", modelo="llama3.2-vision")
+    with (
+        patch.dict("os.environ", {"PDF2MD_LLM_URL": "https://api.exemplo.com/v1"}),
+        patch("urllib.request.urlopen", side_effect=capturar),
+    ):
+        melhorar_markdown("texto", f, config)
+
+    assert len(requisicoes) == 1
+    assert requisicoes[0].full_url == "http://localhost:11434/v1/chat/completions"
+    payload = json.loads(requisicoes[0].data.decode("utf-8"))
+    assert payload["model"] == "llama3.2-vision"
+
+
+def test_melhorar_markdown_usa_key_do_config(tmp_path):
+    """Key do ConfigLLM vai no header Authorization, nunca na URL."""
+    f = tmp_path / "doc.pdf"
+    f.write_bytes(b"x")
+
+    requisicoes = []
+
+    def capturar(req, timeout=None):
+        requisicoes.append(req)
+        return _mock_response("melhorado")
+
+    config = ConfigLLM(url="https://api.exemplo.com/v1", key="sk-segredo-123")
+    with patch("urllib.request.urlopen", side_effect=capturar):
+        melhorar_markdown("texto", f, config)
+
+    assert requisicoes[0].full_url.startswith("https://api.exemplo.com/")
+    assert "sk-segredo-123" not in requisicoes[0].full_url
+    assert requisicoes[0].get_header("Authorization") == "Bearer sk-segredo-123"
+
+
+def test_disponivel_probe_com_config_mesmo_sem_env():
+    """Config explícito força o probe mesmo com URL default e env ausente.
+
+    É exatamente o cenário da GUI: o toggle liga e a config chega via
+    ConfigLLM — sem isto, disponivel() retornava False sem testar (bug
+    do no-op silencioso no .app).
+    """
+    disponivel.cache_clear()
+    with (
+        patch.dict("os.environ", {}, clear=True),
+        patch("urllib.request.urlopen", return_value=_mock_models_response([])),
+    ):
+        assert disponivel(ConfigLLM(url="http://localhost:11434/v1")) is True
+    disponivel.cache_clear()
+
+
+# ── listar_modelos() / testar() (T9) ─────────────────────────────────────────
+
+def _mock_models_response(modelos: list[str]) -> MagicMock:
+    """Mock de resposta de GET /models no formato OpenAI."""
+    body = json.dumps({"data": [{"id": m, "object": "model"} for m in modelos]}).encode("utf-8")
+    resp = MagicMock()
+    resp.read.return_value = body
+    resp.__enter__ = lambda s: s
+    resp.__exit__ = MagicMock(return_value=False)
+    return resp
+
+
+def test_listar_modelos_retorna_ids_ordenados():
+    """Lista ids do GET /models, ordenados."""
+    with patch("urllib.request.urlopen", return_value=_mock_models_response(["b", "a", "c"])):
+        modelos, erro = listar_modelos()
+
+    assert erro is None
+    assert [m["id"] for m in modelos] == ["a", "b", "c"]
+
+
+def test_listar_modelos_erro_seguro_nao_vaza_detalhe():
+    """Falha retorna mensagem segura — sem URL, sem key (CWE-209)."""
+    config = ConfigLLM(url="http://localhost:11434/v1", key="sk-supersecreta-42")
+    with patch("urllib.request.urlopen", side_effect=OSError("Connection refused /tmp/x")):
+        modelos, erro = listar_modelos(config)
+
+    assert modelos is None
+    assert erro == "OSError"
+    assert "sk-supersecreta-42" not in erro
+
+
+def test_listar_modelos_http_401_mensagem_segura():
+    """HTTPError vira 'HTTP <código>' — sem corpo de erro do servidor."""
+    exc = __import__("urllib.error", fromlist=["HTTPError"]).HTTPError(
+        "http://x", 401, "Unauthorized", {}, None
+    )
+    with patch("urllib.request.urlopen", side_effect=exc):
+        modelos, erro = listar_modelos()
+
+    assert modelos is None
+    assert erro == "HTTP 401"
+
+
+def test_listar_modelos_visao_ollama_local():
+    """Ollama local: flag vision vinda de /api/show é reportada."""
+    chamadas = []
+
+    def responder(req, timeout=None):
+        chamadas.append(req)
+        if req.full_url.endswith("/models"):
+            return _mock_models_response(["llama3.2-vision"])
+        # /api/show
+        body = json.dumps({"model_info": {"vision": True}}).encode("utf-8")
+        resp = MagicMock()
+        resp.read.return_value = body
+        resp.__enter__ = lambda s: s
+        resp.__exit__ = MagicMock(return_value=False)
+        return resp
+
+    config = ConfigLLM(url="http://localhost:11434/v1")
+    with patch("urllib.request.urlopen", side_effect=responder):
+        modelos, erro = listar_modelos(config)
+
+    assert erro is None
+    assert modelos == [{"id": "llama3.2-vision", "visao": True}]
+    assert any(r.full_url == "http://localhost:11434/api/show" for r in chamadas)
+
+
+def test_listar_modelos_visao_desconhecida_provider_remoto():
+    """Provider remoto: visao é None (sem /api/show)."""
+    config = ConfigLLM(url="https://api.groq.com/openai/v1")
+    with patch("urllib.request.urlopen", return_value=_mock_models_response(["llama-3.1-8b"])):
+        modelos, erro = listar_modelos(config)
+
+    assert erro is None
+    assert modelos == [{"id": "llama-3.1-8b", "visao": None}]
+
+
+def test_listar_modelos_url_invalida_erro_seguro():
+    """URL insegura → erro de validação, sem traceback."""
+    modelos, erro = listar_modelos(ConfigLLM(url="file:///etc/passwd"))
+    assert modelos is None
+    assert "http ou https" in erro
+
+
+def test_testar_ok_mede_latencia():
+    """testar() retorna ok=True com latência medida em ms."""
+    with patch("urllib.request.urlopen", return_value=_mock_models_response([])):
+        resultado = testar()
+
+    assert resultado["ok"] is True
+    assert isinstance(resultado["latencia_ms"], int)
+    assert resultado["erro"] is None
+
+
+def test_testar_falha_erro_seguro():
+    """Falha de conexão → ok=False com erro seguro (CWE-209)."""
+    os.environ.pop("PDF2MD_LLM_URL", None)
+    with patch("urllib.request.urlopen", side_effect=OSError("Connection refused")):
+        resultado = testar()
+
+    assert resultado["ok"] is False
+    assert resultado["latencia_ms"] is None
+    assert resultado["erro"] == "OSError"

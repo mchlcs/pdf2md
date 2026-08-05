@@ -26,7 +26,10 @@ BUILD="${RAIZ}/build"
 APP="${DIST}/PDF2MD.app"
 
 # ── Versão: fonte única é o pyproject.toml ──────────────────────────────────
-VERSAO="$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")"
+# Usa python do venv se VIRTUAL_ENV estiver setado, senão python3 do sistema
+PYTHON_BIN="python3"
+[[ -x "${VIRTUAL_ENV}/bin/python" ]] && PYTHON_BIN="${VIRTUAL_ENV}/bin/python"
+VERSAO="$("${PYTHON_BIN}" -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")"
 # Número de build incremental e reproduzível (contagem de commits)
 BUILD_NUM="$(git rev-list --count HEAD 2>/dev/null || echo 1)"
 
@@ -35,14 +38,14 @@ echo "▶ pdf2md build — versão ${VERSAO} (build ${BUILD_NUM})"
 # ── 1. PyInstaller: binário Python one-file ─────────────────────────────────
 # pymupdf precisa dos resources de layout embarcados (senão FileNotFoundError
 # em runtime no binário congelado).
-PYMUPDF_RES="$(python3 -c "import pymupdf, os; print(os.path.join(os.path.dirname(pymupdf.__file__), 'layout', 'resources'))")"
+PYMUPDF_RES="$("${PYTHON_BIN}" -c "import pymupdf, os; print(os.path.join(os.path.dirname(pymupdf.__file__), 'layout', 'resources'))")"
 if [[ ! -d "${PYMUPDF_RES}" ]]; then
     echo "✗ resources do pymupdf não encontrados: ${PYMUPDF_RES}" >&2
     exit 1
 fi
 
 echo "▶ [1/5] PyInstaller → dist/pdf2md"
-pyinstaller core/cli.py \
+"${PYTHON_BIN}" -m PyInstaller core/cli.py \
     --onefile \
     --name pdf2md \
     --add-data "${PYMUPDF_RES}:pymupdf/layout/resources" \
@@ -67,6 +70,10 @@ swiftc -parse-as-library -O \
     gui/PDF2MD/PDF2MDApp.swift \
     gui/PDF2MD/ContentView.swift \
     gui/PDF2MD/BatchProcessor.swift \
+    gui/PDF2MD/LLMConfig.swift \
+    gui/PDF2MD/KeychainHelper.swift \
+    gui/PDF2MD/ProcessRunner.swift \
+    gui/PDF2MD/SettingsView.swift \
     -o "${APP}/Contents/MacOS/PDF2MD"
 
 # ── 3. Monta o bundle .app ──────────────────────────────────────────────────

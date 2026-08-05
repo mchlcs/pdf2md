@@ -5,6 +5,11 @@ import Foundation
 import Combine
 import UserNotifications
 
+/// Container do processo ativo atravessando closures @Sendable (cancelamento).
+final class ProcessoBox: @unchecked Sendable {
+    var processo: Process?
+}
+
 struct ProgressoArquivo: Identifiable, Codable {
     let id: String       // path do arquivo origem
     let status: String   // "aguardando" | "processando" | "concluido" | "erro" | "cancelado" | "ignorado"
@@ -52,7 +57,10 @@ class BatchProcessor: ObservableObject {
         destino: URL?,
         vault: URL?,
         obsidian: Bool,
-        llmFallback: Bool = false
+        llmFallback: Bool = false,
+        llmURL: String? = nil,
+        llmModelo: String? = nil,
+        llmKey: String? = nil
     ) async {
         guard let binario = caminhoBinario else {
             print("Binário pdf2md não encontrado no bundle")
@@ -127,58 +135,53 @@ class BatchProcessor: ObservableObject {
             // --json ao final (posição correta para Typer)
             args.append("--json")
 
-            let processo = Process()
-            processo.executableURL = binario
-            processo.arguments = args
+            // Config do LLM entra no environment do processo (D8) — NUNCA em
+            // argv, que aparece em `ps aux` para qualquer processo do mesmo
+            // usuário (CWE-522). O binário aplica precedência env > default.
+            var envLLM: [String: String] = [:]
+            if llmFallback {
+                if let url = llmURL { envLLM["PDF2MD_LLM_URL"] = url }
+                if let modelo = llmModelo { envLLM["PDF2MD_LLM_MODEL"] = modelo }
+                if let key = llmKey { envLLM["PDF2MD_LLM_KEY"] = key }
+            }
 
-            let stdoutPipe = Pipe()
-            let stderrPipe = Pipe()
-            processo.standardOutput = stdoutPipe
-            processo.standardError = stderrPipe
-
-            // Guarda referência para cancelamento imediato
-            processoAtivo = processo
-
-            do {
-                try processo.run()
-
-                // Drena stdout E stderr concorrentemente enquanto aguarda o
-                // término. Ler só após waitUntilExit() causaria deadlock: se o
-                // processo-filho enche um pipe não-drenado (~64KB), bloqueia em
-                // write() e nunca sai. Os dois pipes são lidos em tasks separadas.
-                let stdoutData: Data = await withTaskCancellationHandler {
-                    await withCheckedContinuation { (continuation: CheckedContinuation<Data, Never>) in
-                        Task.detached {
-                            _ = try? stderrPipe.fileHandleForReading.readToEnd()
-                        }
-                        Task.detached {
-                            let dados = (try? stdoutPipe.fileHandleForReading.readToEnd()) ?? Data()
-                            processo.waitUntilExit()
-                            continuation.resume(returning: dados)
-                        }
-                    }
-                } onCancel: {
-                    if processo.isRunning {
-                        processo.terminate()
-                    }
+            // Guarda referência para cancelamento imediato. O callback roda
+            // antes da primeira suspensão (contexto do chamador); o box
+            // atravessa a fronteira Sendable sem isolamento de actor.
+            let processoBox = ProcessoBox()
+            let stdoutData: Data? = await withTaskCancellationHandler {
+                await ProcessRunner.executar(
+                    binario: binario,
+                    args: args,
+                    env: envLLM.isEmpty ? nil : envLLM,
+                    onProcesso: { processoBox.processo = $0 }
+                )
+            } onCancel: {
+                if let ativo = processoBox.processo, ativo.isRunning {
+                    ativo.terminate()
                 }
+            }
 
-                // Se foi cancelado durante a espera
-                if Task.isCancelled {
-                    atualizarProgresso(id: url.path, status: "cancelado", erro: nil)
-                    continue
-                }
+            // Se foi cancelado durante a espera
+            if Task.isCancelled {
+                atualizarProgresso(id: url.path, status: "cancelado", erro: nil)
+                continue
+            }
 
-                if let string = String(data: stdoutData, encoding: .utf8) {
-                    for linha in string.split(separator: "\n") {
-                        if let jsonData = String(linha).data(using: .utf8),
-                           let item = try? JSONDecoder().decode(ProgressoArquivo.self, from: jsonData) {
-                            atualizarProgresso(id: item.id, status: item.status, erro: item.erro)
-                        }
-                    }
-                }
-            } catch {
+            // ProcessRunner devolve nil quando o binário não iniciou
+            // (ex.: não encontrado no bundle) — conversão sempre emite JSON.
+            guard let stdoutData = stdoutData else {
                 atualizarProgresso(id: url.path, status: "erro", erro: "Falha ao executar processo")
+                continue
+            }
+
+            if let string = String(data: stdoutData, encoding: .utf8) {
+                for linha in string.split(separator: "\n") {
+                    if let jsonData = String(linha).data(using: .utf8),
+                       let item = try? JSONDecoder().decode(ProgressoArquivo.self, from: jsonData) {
+                        atualizarProgresso(id: item.id, status: item.status, erro: item.erro)
+                    }
+                }
             }
         }
 

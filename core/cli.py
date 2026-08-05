@@ -125,6 +125,14 @@ def converter(
         help="Ignora cabeçalho e rodapé de páginas PDF (percentual da altura). "
              "Ex: 5 ignora 5% do topo e 5% do rodapé. Padrão: 0 (desativado).",
     ),
+    llm_url: str | None = typer.Option(
+        None, "--llm-url",
+        help="URL base da API LLM (precedência: flag > PDF2MD_LLM_URL > Ollama local).",
+    ),
+    llm_modelo: str | None = typer.Option(
+        None, "--llm-modelo",
+        help="Modelo LLM (precedência: flag > PDF2MD_LLM_MODEL > llama3.2-vision).",
+    ),
 ) -> None:
     """
     Converte PDFs e imagens em Markdown.
@@ -133,6 +141,7 @@ def converter(
     # Lazy imports: só carrega deps pesadas quando o comando é executado
     from core.batch import StatusArquivo, batch_convert
     from core.image_converter import verificar_tesseract
+    from core.llm_enhancer import ConfigLLM
 
     # Validação de segurança
     try:
@@ -160,6 +169,12 @@ def converter(
     if vault is not None:
         obsidian = True
 
+    # Config LLM: flag > env > default — None preserva o comportamento env-only
+    llm_config = (
+        ConfigLLM(url=llm_url, modelo=llm_modelo)
+        if (llm_url or llm_modelo) else None
+    )
+
     inicio = time.perf_counter()
     try:
         with Progress(
@@ -185,6 +200,7 @@ def converter(
                     usar_llm=usar_llm,
                     llm_fallback=llm_fallback,
                     ignorar_margens=ignorar_margens,
+                    llm_config=llm_config,
                 )
             progress.update(task, total=len(resultados), completed=len(resultados))
     except (FileNotFoundError, NotADirectoryError) as exc:
@@ -263,6 +279,88 @@ def converter(
                 for aviso in res.avisos:
                     console.print(f"    [yellow]• {aviso}[/yellow]")
 
+
+# ── Subcomandos `llm modelos` / `llm testar` (diagnóstico + GUI) ─────────────
+# A GUI consome --json para popular o picker de modelos e o indicador de
+# status. A API key NUNCA é aceita via argv (CWE-522) — vem do environment,
+# que o bridge Swift injeta em processo.environment (nunca em ps aux).
+
+llm_app = typer.Typer(
+    name="llm",
+    help="Diagnóstico do LLM: lista modelos e testa conexão.",
+    add_completion=False,
+)
+
+
+@llm_app.command("modelos")
+def llm_modelos(
+    json_output: bool = typer.Option(False, "--json", hidden=True, help="Output em JSON no stdout"),
+) -> None:
+    """
+    Lista os modelos disponíveis no endpoint configurado.
+
+    URL/key vêm do environment (PDF2MD_LLM_URL / PDF2MD_LLM_KEY) ou do
+    default Ollama local. Falha retorna {"ok": false} com exit 0 — sem
+    traceback (o JSON é o contrato com a GUI, exit!=0 quebraria o parse).
+    """
+    from core.llm_enhancer import listar_modelos
+
+    modelos, erro = listar_modelos()
+
+    if json_output:
+        if modelos is None:
+            linha = json.dumps({"ok": False, "modelos": [], "erro": erro}, ensure_ascii=False)
+        else:
+            linha = json.dumps({"ok": True, "modelos": modelos}, ensure_ascii=False)
+        sys.stdout.write(linha + "\n")
+        sys.stdout.flush()
+        return
+
+    if modelos is None:
+        console.print(f"[red]Falha ao listar modelos: {erro}[/red]")
+        console.print("[yellow]Dica: verifique PDF2MD_LLM_URL e se o servidor está rodando.[/yellow]")
+        raise typer.Exit(code=1)
+
+    if not modelos:
+        console.print("[yellow]Nenhum modelo retornado pelo endpoint.[/yellow]")
+        return
+
+    table = Table(title="Modelos disponíveis")
+    table.add_column("Modelo", style="cyan")
+    table.add_column("Visão", style="green")
+    for m in modelos:
+        visao = "sim" if m["visao"] is True else ("não" if m["visao"] is False else "desconhecido")
+        table.add_row(m["id"], visao)
+    console.print(table)
+
+
+@llm_app.command("testar")
+def llm_testar(
+    json_output: bool = typer.Option(False, "--json", hidden=True, help="Output em JSON no stdout"),
+) -> None:
+    """
+    Testa a conexão com o endpoint configurado (sem cache).
+
+    Mede latência de GET /models. Falha retorna {"ok": false} com exit 0 —
+    a GUI usa o campo `erro` para o aviso (mensagem segura, CWE-209).
+    """
+    from core.llm_enhancer import testar
+
+    resultado = testar()
+
+    if json_output:
+        sys.stdout.write(json.dumps(resultado, ensure_ascii=False) + "\n")
+        sys.stdout.flush()
+        return
+
+    if resultado["ok"]:
+        console.print(f"[green]Conectado ({resultado['latencia_ms']}ms)[/green]")
+    else:
+        console.print(f"[red]Inacessível: {resultado['erro']}[/red]")
+        raise typer.Exit(code=1)
+
+
+app.add_typer(llm_app)
 
 if __name__ == "__main__":
     app()
