@@ -45,9 +45,11 @@ jobs:
           uv run detect-secrets scan --baseline .secrets.baseline
 
       - name: Scan de credenciais (gitleaks)
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # Chamada direta (não a action): a action falhava com
+        # "stderr is not empty" em versões novas do gitleaks.
+        run: |
+          brew install gitleaks
+          gitleaks git --no-banner --exit-code 1
 
   # Smoke do empacotamento: valida que o PyInstaller gera o binário e que a
   # forma canônica de CLI (args EXATOS da GUI, sem subcomando) converte.
