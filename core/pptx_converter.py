@@ -4,7 +4,7 @@ Estratégia: python-pptx → extrai título + corpo + tabelas por slide.
 """
 from pathlib import Path
 
-from core.utils import _sanitizar_celula_md, _validar_existencia
+from core.utils import _sanitizar_celula_md, _validar_existencia, tabela_md
 
 
 def pptx_to_md(path: Path) -> str:
@@ -83,15 +83,14 @@ def _processar_shape(shape, partes: list[str]) -> None:
 
 
 def _tabela_para_md(table) -> str:
-    """Converte python-pptx Table em tabela Markdown."""
+    """Converte python-pptx Table em tabela Markdown (utils.tabela_md)."""
     if not table.rows:
         return ""
-
-    linhas: list[str] = []
-    for i, row in enumerate(table.rows):
-        celulas = [_sanitizar_celula_md(cell.text) for cell in row.cells]
-        linhas.append("| " + " | ".join(celulas) + " |")
-        if i == 0:
-            linhas.append("| " + " | ".join(["---"] * len(celulas)) + " |")
-
-    return "\n".join(linhas)
+    # table.rows não aceita slice — só indexação inteira
+    rows = list(table.rows)
+    cabecalho = [_sanitizar_celula_md(cell.text) for cell in rows[0].cells]
+    linhas = [
+        [_sanitizar_celula_md(cell.text) for cell in row.cells]
+        for row in rows[1:]
+    ]
+    return tabela_md(cabecalho, linhas)

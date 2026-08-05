@@ -45,13 +45,13 @@ EXTENSOES_PERMITIDAS: frozenset[str] = (
 )
 
 
-# ── Feature `--imagens` (PDF-only): política de imagens embutidas ─────────────
+# ── Feature `--imagens`: política de imagens embutidas ───────────────────────
 
 class ModoImagem(StrEnum):
     """
-    Política de tratamento das imagens embutidas em PDFs (flag --imagens).
+    Política de tratamento das imagens embutidas em PDFs e DOCX (flag --imagens).
 
-    PDF-only: outros formatos ignoram a flag (warning no batch).
+    PDF/DOCX-only: outros formatos ignoram a flag (warning no batch).
     """
 
     transcrever = "transcrever"  # default — OCR só de páginas-scan (byte-idêntico ao atual)
@@ -84,6 +84,24 @@ def _validar_extensao(path: Path, permitidas: frozenset[str]) -> None:
 def _sanitizar_celula_md(text: str) -> str:
     """Normaliza texto de célula para Markdown seguro (pipe escaping)."""
     return text.strip().replace("\n", " ").replace("|", "\\|")
+
+
+def tabela_md(cabecalho: list[str], linhas: list[list[str]]) -> str:
+    """
+    Monta tabela Markdown GFM a partir de células já sanitizadas.
+
+    Fonte única dos 3 construtores duplicados (pptx/xlsx/csv) — o header
+    vazio devolve string vazia (tabela vazia não renderiza).
+    """
+    if not cabecalho:
+        return ""
+    partes = [
+        "| " + " | ".join(cabecalho) + " |",
+        "| " + " | ".join(["---"] * len(cabecalho)) + " |",
+    ]
+    for linha in linhas:
+        partes.append("| " + " | ".join(linha) + " |")
+    return "\n".join(partes)
 
 
 def validar_path_seguro(path: Path, base_permitida: Path | None = None) -> Path:

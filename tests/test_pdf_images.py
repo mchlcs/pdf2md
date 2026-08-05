@@ -256,3 +256,43 @@ def test_scan_renders_contam_no_limite(tmp_path, mock_tesseract):
     assert len(list(assets.iterdir())) == 1  # só o primeiro render
     assert any("limite" in a for a in avisos)
     assert md.count("![[") + md.count("![") == 1
+
+
+def test_montar_contexto_resolve_paths_var(tmp_path):
+    """montar_contexto resolve /var→/private/var — bug latente auditado (M9).
+
+    Chamada direta com assets_dir sob /var/folders (path não-resolvido do
+    macOS): o containment assert de caminho_seguro compara paths resolvidos;
+    sem o .resolve() na montagem, a extração falhava com "asset fora do
+    diretório de assets".
+    """
+    import tempfile
+
+    from core.converter import pdf_to_md
+    from core.utils import ModoImagem as Modo
+
+    base = Path(tempfile.mkdtemp())  # /var/folders/... (não-resolvido)
+    assert str(base).startswith("/var/")  # pré-condição do bug
+
+    pdf = base / "doc.pdf"
+    d = fitz.open()
+    pagina = d.new_page(width=595, height=842)
+    pagina.insert_text(
+        (50, 150),
+        "Documento com imagem para validar a resolucao de paths na montagem do contexto.",
+    )
+    img = Image.new("RGB", (40, 40), color=(10, 200, 10))
+    ip = base / "g.png"
+    img.save(ip)
+    pagina.insert_image(fitz.Rect(50, 50, 90, 90), filename=str(ip))
+    d.save(str(pdf))
+    d.close()
+
+    out = base / "out"
+    assets = out / "doc_assets"
+    out.mkdir()
+
+    md = pdf_to_md(pdf, modo_imagem=Modo.extrair, assets_dir=assets, md_dir=out)
+
+    assert "![" in md
+    assert (assets / "img_p001_0.png").exists()

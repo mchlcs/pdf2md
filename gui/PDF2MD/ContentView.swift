@@ -18,12 +18,18 @@ struct ContentView: View {
     @AppStorage(LLMDefaultsKeys.modelo) private var llmModelo = ""
     @AppStorage(LLMDefaultsKeys.urlPersonalizada) private var llmUrlPersonalizada = ""
 
+    // Cache da key: ler Keychain (IPC com securityd) a cada body eval era
+    // o gargalo do drag-over — cache carregado uma vez e revalidado quando
+    // o app volta ao ativo (Settings pode ter alterado a key).
+    @State private var llmKeyCache: String? = KeychainHelper.ler()
+    @Environment(\.scenePhase) private var scenePhase
+
     /// True quando há provider + key + modelo suficientes para o LLM (D10).
     private var llmConfigurado: Bool {
         LLMProvider.configurado(
             providerRaw: llmProviderRaw,
             urlPersonalizada: llmUrlPersonalizada,
-            chave: KeychainHelper.ler(),
+            chave: llmKeyCache,
             modelo: llmModelo
         )
     }
@@ -140,6 +146,9 @@ struct ContentView: View {
             }
         }
         .frame(minWidth: 480, minHeight: 420)
+        .onChange(of: scenePhase) { fase in
+            if fase == .active { llmKeyCache = KeychainHelper.ler() }
+        }
         // Alert com mensagem dinâmica — distingue clipboard vazio de erro de I/O
         .alert(
             "Erro ao colar imagem",
@@ -447,7 +456,7 @@ struct ContentView: View {
                 ),
                 llmModelo: llmModelo.trimmingCharacters(in: .whitespaces).isEmpty
                     ? nil : llmModelo,
-                llmKey: KeychainHelper.ler()
+                llmKey: llmKeyCache
             )
         }
     }

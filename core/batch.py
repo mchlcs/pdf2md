@@ -144,8 +144,8 @@ def _converter_arquivo(
     """
     Despacha para o conversor correto baseado na extensão. None = não suportado.
 
-    `--imagens` é PDF-only: só pdf_to_md recebe o modo (padrão de
-    `ignorar_margens`); outros formatos ganham um aviso, não erro.
+    `--imagens` é PDF/DOCX-only: só os conversores desses formatos recebem
+    o modo (padrão de `ignorar_margens`); outros ganham um aviso, não erro.
     """
     sufixo = origem.suffix.lower()
     conversor = next(

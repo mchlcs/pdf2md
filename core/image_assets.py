@@ -79,6 +79,39 @@ class ContextoAssets:
     avisos: list[str]     # avisos de extração (limites, falhas)
 
 
+def montar_contexto(
+    origem: Path,
+    modo_imagem: ModoImagem,
+    assets_dir: Path | None,
+    md_dir: Path | None,
+    wikilinks: bool,
+    prefixo_nome: str,
+    avisos: list[str] | None,
+) -> ContextoAssets | None:
+    """
+    Constrói o contexto de assets de um documento (None = modo transcrever).
+
+    Resolve assets_dir e md_dir JÁ NA MONTAGEM: no macOS `/var` é symlink de
+    `/private/var` e o containment assert de `caminho_seguro` compara paths
+    resolvidos — construir sem `.resolve()` quebrava em chamadas diretas
+    com paths não-resolvidos (bug latente, auditado 2026-08-05).
+
+    O conversor decide o tratamento do modo `ignorar` (PDF usa o contexto
+    para pular OCR de scans; DOCX trata como descarte e passa None).
+    """
+    if modo_imagem == ModoImagem.transcrever:
+        return None
+    dir_assets = (assets_dir or (origem.parent / f"{origem.stem}_assets")).resolve()
+    return ContextoAssets(
+        modo=modo_imagem,
+        coletor=ColetorAssets(prefixo=prefixo_nome),
+        assets_dir=dir_assets,
+        md_dir=(md_dir or dir_assets.parent).resolve(),
+        wikilinks=wikilinks,
+        avisos=avisos if avisos is not None else [],
+    )
+
+
 def gerar_nome(prefixo: str, base: str, extensao: str) -> str:
     """Gera o nome do asset (D5): base posicional + extensão segura."""
     return f"{prefixo}{base}.{extensao.lstrip('.')}"

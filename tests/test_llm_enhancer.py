@@ -15,7 +15,9 @@ from core.llm_enhancer import (
     listar_modelos,
     melhorar_markdown,
     ocr_com_visao,
-    testar,
+)
+from core.llm_enhancer import (
+    testar as _testar_llm,
 )
 
 # ── Helper: mock de resposta HTTP ────────────────────────────────────────────
@@ -463,7 +465,7 @@ def test_listar_modelos_url_invalida_erro_seguro():
 def test_testar_ok_mede_latencia():
     """testar() retorna ok=True com latência medida em ms."""
     with patch("urllib.request.urlopen", return_value=_mock_models_response([])):
-        resultado = testar()
+        resultado = _testar_llm()
 
     assert resultado["ok"] is True
     assert isinstance(resultado["latencia_ms"], int)
@@ -474,7 +476,7 @@ def test_testar_falha_erro_seguro():
     """Falha de conexão → ok=False com erro seguro (CWE-209)."""
     os.environ.pop("PDF2MD_LLM_URL", None)
     with patch("urllib.request.urlopen", side_effect=OSError("Connection refused")):
-        resultado = testar()
+        resultado = _testar_llm()
 
     assert resultado["ok"] is False
     assert resultado["latencia_ms"] is None

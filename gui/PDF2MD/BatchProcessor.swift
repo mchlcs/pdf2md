@@ -44,8 +44,9 @@ class BatchProcessor: ObservableObject {
     @Published var concluido: Bool = false
     @Published var duracaoTotal: TimeInterval?   // duração total da última conversão
 
-    // Processo ativo — referência para cancelamento imediato
-    private var processoAtivo: Process?
+    // Processo ativo — referência para cancelamento imediato (M2b: o box
+    // vive na classe para o cancelar() terminar o processo de verdade).
+    private var processoBox: ProcessoBox?
 
     // Localiza binário Python embarcado no bundle
     private var caminhoBinario: URL? {
@@ -69,7 +70,7 @@ class BatchProcessor: ObservableObject {
 
         // Evita reentrância: ignora novo início enquanto uma conversão corre.
         // Sem isto, cancelar+reconverter cria duas execuções que se atropelam
-        // no MainActor (zerando estaProcessando/processoAtivo da nova).
+        // no MainActor (zerando estaProcessando/processoBox da nova).
         guard !estaProcessando else { return }
 
         estaProcessando = true
@@ -148,16 +149,17 @@ class BatchProcessor: ObservableObject {
             // Guarda referência para cancelamento imediato. O callback roda
             // antes da primeira suspensão (contexto do chamador); o box
             // atravessa a fronteira Sendable sem isolamento de actor.
-            let processoBox = ProcessoBox()
+            let box = ProcessoBox()
+            processoBox = box
             let stdoutData: Data? = await withTaskCancellationHandler {
                 await ProcessRunner.executar(
                     binario: binario,
                     args: args,
                     env: envLLM.isEmpty ? nil : envLLM,
-                    onProcesso: { processoBox.processo = $0 }
+                    onProcesso: { box.processo = $0 }
                 )
             } onCancel: {
-                if let ativo = processoBox.processo, ativo.isRunning {
+                if let ativo = box.processo, ativo.isRunning {
                     ativo.terminate()
                 }
             }
@@ -185,7 +187,7 @@ class BatchProcessor: ObservableObject {
             }
         }
 
-        processoAtivo = nil
+        processoBox = nil
         estaProcessando = false
         concluido = true  // conversão terminou (concluída ou cancelada) → habilita "Limpar"
         duracaoTotal = Date().timeIntervalSince(inicioTotal)
@@ -201,8 +203,8 @@ class BatchProcessor: ObservableObject {
     /// liquidado pelo loop em iniciarConversao, mantendo um único dono do estado
     /// e evitando a corrida de teardown ao reconverter.
     func cancelar() {
-        if processoAtivo?.isRunning == true {
-            processoAtivo?.terminate()
+        if let ativo = processoBox?.processo, ativo.isRunning {
+            ativo.terminate()
         }
     }
 
@@ -259,6 +261,6 @@ class BatchProcessor: ObservableObject {
         estaProcessando = false
         concluido = false
         duracaoTotal = nil
-        processoAtivo = nil
+        processoBox = nil
     }
 }

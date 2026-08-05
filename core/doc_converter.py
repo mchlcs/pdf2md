@@ -25,6 +25,7 @@ from typing import IO, Protocol
 from core.image_assets import (
     ColetorAssets,
     ContextoAssets,
+    montar_contexto,
     preparar_assets_dir,
     registrar_asset,
 )
@@ -104,39 +105,14 @@ def doc_to_md(
     _validar_extensao(path, EXTENSOES_DOC)
 
     if sufixo == ".docx":
-        return _docx_para_md(path, _montar_contexto(
+        # ignorar no DOCX = descarte (mesmo do transcrever) — sem contexto
+        contexto = None if modo_imagem == ModoImagem.ignorar else montar_contexto(
             path, modo_imagem, assets_dir, md_dir, wikilinks, prefixo_nome, avisos
-        ))
+        )
+        return _docx_para_md(path, contexto)
     else:
         # .doc via textutil: só texto — modo de imagem não se aplica
         return _doc_para_md(path)
-
-
-def _montar_contexto(
-    path: Path,
-    modo_imagem: ModoImagem,
-    assets_dir: Path | None,
-    md_dir: Path | None,
-    wikilinks: bool,
-    prefixo_nome: str,
-    avisos: list[str] | None,
-) -> ContextoAssets | None:
-    """Constrói o contexto de assets do documento (None p/ transcrever)."""
-    if modo_imagem in (ModoImagem.transcrever, ModoImagem.ignorar):
-        return None
-    from core.image_assets import ColetorAssets
-
-    # Resolvido desde o início: no macOS /var é symlink de /private/var e o
-    # containment assert de caminho_seguro compara paths resolvidos.
-    dir_assets = (assets_dir or (path.parent / f"{path.stem}_assets")).resolve()
-    return ContextoAssets(
-        modo=modo_imagem,
-        coletor=ColetorAssets(prefixo=prefixo_nome),
-        assets_dir=dir_assets,
-        md_dir=(md_dir or dir_assets.parent).resolve(),
-        wikilinks=wikilinks,
-        avisos=avisos if avisos is not None else [],
-    )
 
 
 def _docx_para_md(path: Path, contexto: ContextoAssets | None) -> str:

@@ -11,7 +11,7 @@ obsoleto desde Excel 2007. Usuários devem converter para .xlsx primeiro.
 import csv
 from pathlib import Path
 
-from core.utils import _sanitizar_celula_md, _validar_existencia
+from core.utils import _sanitizar_celula_md, _validar_existencia, tabela_md
 
 # Encodings tentados em cascade para CSV — latin-1 nunca falha (mapeia 256 bytes).
 _CSV_ENCODINGS = ("utf-8-sig", "utf-8", "cp1252", "latin-1")
@@ -71,13 +71,11 @@ def _xlsx_para_md(path: Path) -> str:
             if not any(headers):
                 continue
 
-            partes.append("| " + " | ".join(headers) + " |")
-            partes.append("| " + " | ".join(["---"] * len(headers)) + " |")
-
-            for row in rows[1:]:
-                celulas = [_celula_str(c) for c in row]
-                if any(celulas):
-                    partes.append("| " + " | ".join(celulas) + " |")
+            linhas = [
+                [_celula_str(c) for c in row]
+                for row in rows[1:] if any(_celula_str(c) for c in row)
+            ]
+            partes.append(tabela_md(headers, linhas))
     finally:
         wb.close()
 
@@ -101,15 +99,8 @@ def _csv_para_md(path: Path) -> str:
         return ""
 
     headers = [_celula_str(c) for c in rows[0]]
-    linhas: list[str] = []
-    linhas.append("| " + " | ".join(headers) + " |")
-    linhas.append("| " + " | ".join(["---"] * len(headers)) + " |")
-
-    for row in rows[1:]:
-        celulas = [_celula_str(c) for c in row]
-        linhas.append("| " + " | ".join(celulas) + " |")
-
-    return "\n".join(linhas)
+    linhas = [[_celula_str(c) for c in row] for row in rows[1:]]
+    return tabela_md(headers, linhas)
 
 
 def _celula_str(valor) -> str:

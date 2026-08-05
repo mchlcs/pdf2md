@@ -1,7 +1,7 @@
 """
 Converte arquivos PDF em Markdown.
 Detecta automaticamente páginas com imagem e aplica OCR.
-Feature `--imagens` (PDF-only): extrai imagens embutidas como assets (ADR-0005).
+Feature `--imagens`: extrai imagens embutidas de PDF/DOCX como assets (ADR-0005).
 """
 import os
 import tempfile
@@ -10,7 +10,7 @@ from pathlib import Path
 import fitz  # PyMuPDF
 import pymupdf4llm
 
-from core.image_assets import ColetorAssets, ContextoAssets
+from core.image_assets import ContextoAssets, montar_contexto
 from core.image_converter import (
     _configurar_tesseract_cmd,
     alt_text_enxuto,
@@ -30,10 +30,6 @@ _MIN_TEXTO_PAGINA = 50
 
 # DPI para renderização de páginas sem texto nativo (para OCR).
 _OCR_DPI = 300
-
-# Margem vertical padrão (em % da altura da página) ignorada quando
-# --ignorar-margens está ativo. Cobre cabeçalhos e rodapés comuns.
-_MARGEM_PADRAO_PCT = 5.0
 
 
 def pdf_to_md(
@@ -86,24 +82,16 @@ def pdf_to_md(
     if path.suffix.lower() != ".pdf":
         raise ValueError("Arquivo não é PDF válido")
 
-    contexto = None
-    if modo_imagem != ModoImagem.transcrever:
-        dir_assets = assets_dir or (path.parent / f"{path.stem}_assets")
-        contexto = ContextoAssets(
-            modo=modo_imagem,
-            coletor=ColetorAssets(prefixo=prefixo_nome),
-            assets_dir=dir_assets,
-            md_dir=md_dir or dir_assets.parent,
-            wikilinks=wikilinks,
-            avisos=avisos if avisos is not None else [],
-        )
+    contexto = montar_contexto(
+        path, modo_imagem, assets_dir, md_dir, wikilinks, prefixo_nome, avisos
+    )
 
     try:
         doc = fitz.open(str(path))
     except Exception as exc:
         raise RuntimeError("Falha ao abrir PDF — arquivo corrompido ou formato inválido") from exc
 
-    chunks = _extrair_chunks_markdown(path)
+    chunks = _extrair_chunks_markdown(path, contexto)
 
     try:
         partes = [
@@ -116,7 +104,7 @@ def pdf_to_md(
     return "\n\n".join(partes)
 
 
-def _extrair_chunks_markdown(path: Path) -> list[dict]:
+def _extrair_chunks_markdown(path: Path, contexto: ContextoAssets | None = None) -> list[dict]:
     """
     Extrai Markdown de todas as páginas em uma única passada do pymupdf4llm.
 
@@ -124,7 +112,8 @@ def _extrair_chunks_markdown(path: Path) -> list[dict]:
     reparseava o PDF inteiro por página — O(n) parses do documento.
 
     Fallback graceful: se pymupdf4llm falhar (PDF corrompido, formato exótico),
-    retorna lista vazia — o texto bruto do fitz ainda é usado por _processar_pagina.
+    retorna lista vazia com aviso — o texto bruto do fitz ainda é usado por
+    _processar_pagina, mas o usuário fica sabendo (não é silencioso).
     """
     try:
         chunks = pymupdf4llm.to_markdown(str(path), page_chunks=True)
@@ -132,6 +121,10 @@ def _extrair_chunks_markdown(path: Path) -> list[dict]:
             return chunks
         return []
     except Exception:
+        if contexto is not None:
+            contexto.avisos.append(
+                "extração de markdown via pymupdf4llm falhou — usando texto bruto do PDF"
+            )
         return []
 
 

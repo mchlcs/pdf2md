@@ -93,12 +93,12 @@ struct SettingsView: View {
                 .onChange(of: providerRaw) { _ in
                     // Trocar provider atualiza a URL e limpa o modelo selecionado
                     modelo = ""
-                    recarregar()
+                    agendarRecarregar()
                 }
 
                 if provider == .personalizado {
                     TextField("URL base da API (compatível com OpenAI)", text: $urlPersonalizada)
-                        .onChange(of: urlPersonalizada) { _ in recarregar() }
+                        .onChange(of: urlPersonalizada) { _ in agendarRecarregar() }
                 }
 
                 if provider.requerKey {
@@ -110,7 +110,7 @@ struct SettingsView: View {
                             } else {
                                 KeychainHelper.salvar(chave)
                             }
-                            recarregar()
+                            agendarRecarregar()
                         }
                 }
             }
@@ -155,7 +155,10 @@ struct SettingsView: View {
                     Text(status)
                         .font(.callout)
                     Spacer()
-                    Button("Testar") { verificarConexao(geracao: geracao + 1) }
+                    Button("Testar") {
+                        geracao += 1
+                        verificarConexao(geracao: geracao)
+                    }
                         .controlSize(.small)
                         .disabled(!configurado)
                 }
@@ -198,6 +201,20 @@ struct SettingsView: View {
         carregandoModelos = true
         carregarModelos(geracao: geracao)
         verificarConexao(geracao: geracao)
+    }
+
+    /// Gatilho com debounce (~400ms) — cada tecla no SecureField/URL não pode
+    /// disparar 2 subprocessos (`llm modelos`/`llm testar`) por keystroke.
+    private func agendarRecarregar() {
+        geracao += 1
+        let alvo = geracao
+        Task {
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard alvo == self.geracao else { return }  // mudança mais recente chegou
+            carregandoModelos = true
+            carregarModelos(geracao: alvo)
+            verificarConexao(geracao: alvo)
+        }
     }
 
     private func carregarModelos(geracao: Int) {
