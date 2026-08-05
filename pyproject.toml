@@ -44,7 +44,7 @@ dev = [
 ]
 
 [project.scripts]
-pdf2md = "core.cli:app"
+pdf2md = "core.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["core"]

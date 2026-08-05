@@ -23,7 +23,7 @@ def _sem_ansi(texto: str) -> str:
 
 def test_cli_help():
     """--help mostra usage e opções."""
-    result = runner.invoke(app, ["--help"])
+    result = runner.invoke(app, ["converter", "--help"])
     assert result.exit_code == 0
     assert "pdf2md" in result.stdout.lower() or "convert" in result.stdout.lower()
 
@@ -227,3 +227,46 @@ def test_cli_llm_testar_json_falha_sem_traceback():
     assert payload["ok"] is False
     assert payload["erro"] == "HTTP 401"
     assert "Traceback" not in result.output
+
+
+# ── Default-command (C1): pdf2md <arquivo> <destino> dispensa "converter" ────
+
+def test_cli_main_shim_injeta_converter(monkeypatch):
+    """Entry point real injeta `converter` quando o 1º arg não é comando."""
+    from core.cli import main
+
+    chamadas = []
+    with monkeypatch.context() as m:
+        m.setattr("sys.argv", ["pdf2md", "arquivo.pdf", "saida/"])
+        m.setattr("core.cli.app", type("FakeApp", (), {"__call__": lambda self: chamadas.append("app")})())
+        main()
+        # sys.argv foi mutado ANTES de chamar app — o shim funcionou
+        assert chamadas == ["app"]
+
+
+def test_cli_main_shim_nao_injeta_para_comando(monkeypatch):
+    """`pdf2md llm modelos` NÃO ganha prefixo converter."""
+    from core.cli import main
+
+    chamadas = []
+    with monkeypatch.context() as m:
+        m.setattr("sys.argv", ["pdf2md", "llm", "modelos", "--json"])
+        m.setattr("core.cli.app", type("FakeApp", (), {"__call__": lambda self: chamadas.append("app")})())
+        main()
+        assert chamadas == ["app"]
+        import sys as _sys
+        assert _sys.argv[1] == "llm"  # sem prefixo"
+
+
+def test_cli_main_shim_nao_injeta_para_flag(monkeypatch):
+    """`pdf2md --help` não vira `converter --help`."""
+    from core.cli import main
+
+    chamadas = []
+    with monkeypatch.context() as m:
+        m.setattr("sys.argv", ["pdf2md", "--help"])
+        m.setattr("core.cli.app", type("FakeApp", (), {"__call__": lambda self: chamadas.append("app")})())
+        main()
+        assert chamadas == ["app"]
+        import sys as _sys
+        assert _sys.argv[1] == "--help"  # sem prefixo"

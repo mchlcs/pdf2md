@@ -5,6 +5,16 @@ Versioning follows [SemVer](https://semver.org/).
 
 ## [0.6.0] — 2026-08-05
 
+### Fixed
+
+- **CLI/GUI: o `.app` não convertia (desde v0.4.0).** O CLI exigia o
+  subcomando `converter`, mas a GUI chamava `pdf2md <arquivo> <destino>
+  --json` → "No such command". Default-command no entry point: a forma
+  canônica `pdf2md <origem> [destino] [opções]` agora funciona (a explícita
+  `pdf2md converter ...` continua). Auditado por Grok 4.5 max (C1).
+- **GUI: avisos de qualidade eram descartados** — `atualizarProgresso`
+  não propagava `item.avisos`; o ícone âmbar nunca aparecia (A1).
+
 ### Added
 
 - **DOCX unificado com o PDF (T19):** `doc_to_md` para de embutir base64 por

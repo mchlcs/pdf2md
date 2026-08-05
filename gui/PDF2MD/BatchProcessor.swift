@@ -206,9 +206,9 @@ class BatchProcessor: ObservableObject {
         }
     }
 
-    private func atualizarProgresso(id: String, status: String, erro: String?) {
+    private func atualizarProgresso(id: String, status: String, erro: String?, avisos: [String] = []) {
         if let index = progresso.firstIndex(where: { $0.id == id }) {
-            progresso[index] = ProgressoArquivo(id: id, status: status, erro: erro)
+            progresso[index] = ProgressoArquivo(id: id, status: status, erro: erro, avisos: avisos)
         }
     }
 
