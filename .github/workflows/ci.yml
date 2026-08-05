@@ -69,6 +69,9 @@ jobs:
       - name: Sincronizar dependências
         run: uv sync --extra dev --frozen
 
+      - name: Instalar Tesseract (OCR — o smoke converte PDF que requer)
+        run: brew install tesseract tesseract-lang
+
       - name: Gerar PDF de teste
         run: |
           uv run python - <<'EOF'
