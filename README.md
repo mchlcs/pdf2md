@@ -59,17 +59,18 @@ tags:
 
 ### ⚡ AI Enhance (fallback)
 
-Enable the **AI Enhance** toggle to use a local LLM (Ollama) when conversion detects quality issues (broken words, corrupted encoding, very short output).
+Enable the **AI Enhance** toggle to use an LLM when conversion detects quality issues (broken words, corrupted encoding, very short output).
 
-Requires [Ollama](https://ollama.com) and the `PDF2MD_LLM_URL` variable:
+Configure the provider in the app's **Settings** window (pdf2md → Settings…): provider, model and API key. The model list is fetched live from the provider; if it's unreachable, a static list is shown. The API key is stored in the **macOS Keychain**, never in plain settings.
+
+Providers: Ollama (local), Gemini, Groq, OpenRouter, or a custom OpenAI-compatible URL.
 
 ```bash
 brew install ollama
 ollama pull llama3.2-vision
-export PDF2MD_LLM_URL=http://localhost:11434/v1
 ```
 
-Also works with Gemini, Groq, OpenRouter — see CLI section below.
+The CLI equivalent uses environment variables — see CLI section below.
 
 ## CLI
 
@@ -95,14 +96,23 @@ pdf2md docs/ --vault ~/Obsidian/my-vault
 export PDF2MD_LLM_URL=http://localhost:11434/v1   # Ollama (free, local)
 pdf2md scanned.pdf output/ --llm-fallback
 
+# Flags override env vars (flag > env > default)
+pdf2md docs/ output/ --llm-fallback --llm-url https://api.groq.com/openai/v1 --llm-modelo llama-3.1-8b-instant
+
 # LLM always (regardless of quality)
 pdf2md docs/ output/ --llm
 
 # Ignore page headers and footers (5% of page height from top and bottom)
 pdf2md document.pdf output/ --ignorar-margens 5
+
+# Diagnose the LLM endpoint (used by the GUI picker)
+pdf2md llm modelos --json    # → {"ok":true,"modelos":[{"id":"...","visao":true}]}
+pdf2md llm testar --json     # → {"ok":true,"latencia_ms":42}
 ```
 
 ### LLM configuration
+
+Precedence: `--llm-url` / `--llm-modelo` flags > env vars > defaults. The API key always comes from `PDF2MD_LLM_KEY` (or the GUI's Keychain) — never from a flag.
 
 | Provider | PDF2MD_LLM_URL | PDF2MD_LLM_MODEL |
 |----------|----------------|------------------|

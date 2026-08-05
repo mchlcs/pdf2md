@@ -12,6 +12,7 @@ from core.converter import pdf_to_md
 from core.doc_converter import doc_to_md
 from core.formatter import add_obsidian_frontmatter
 from core.image_converter import image_to_md
+from core.llm_enhancer import ConfigLLM
 from core.pptx_converter import pptx_to_md
 from core.quality import aplicar_pipeline_qualidade
 from core.utils import (
@@ -85,6 +86,8 @@ def _processar_arquivo(
     usar_llm: bool = False,
     llm_fallback: bool = False,
     ignorar_margens: float = 0.0,
+    llm_url: str | None = None,
+    llm_modelo: str | None = None,
 ) -> dict:
     """
     Worker executado em ThreadPoolExecutor. Recebe/retorna tipos simples
@@ -100,7 +103,10 @@ def _processar_arquivo(
         md = _converter_arquivo(origem, ignorar_margens)
         if md is None:
             return _resultado_ignorado(origem_str, None)
-        md, avisos = aplicar_pipeline_qualidade(md, origem, usar_llm, llm_fallback)
+        llm_config = _montar_config_llm(llm_url, llm_modelo)
+        md, avisos = aplicar_pipeline_qualidade(
+            md, origem, usar_llm, llm_fallback, llm_config
+        )
 
         if obsidian:
             md = add_obsidian_frontmatter(md, origem)
@@ -156,6 +162,16 @@ def _resultado_erro(origem_str: str, exc: Exception) -> dict:
     }
 
 
+def _montar_config_llm(llm_url: str | None, llm_modelo: str | None) -> ConfigLLM | None:
+    """
+    Constrói ConfigLLM só quando flags foram passadas — None preserva o
+    comportamento env-only existente (backward-compatible).
+    """
+    if llm_url is None and llm_modelo is None:
+        return None
+    return ConfigLLM(url=llm_url, modelo=llm_modelo)
+
+
 def batch_convert(
     origem: Path,
     destino: Path,
@@ -166,6 +182,8 @@ def batch_convert(
     usar_llm: bool = False,
     llm_fallback: bool = False,
     ignorar_margens: float = 0.0,
+    llm_url: str | None = None,
+    llm_modelo: str | None = None,
 ) -> list[ResultadoArquivo]:
     """
     Converte todos os arquivos suportados em `origem` para Markdown em `destino`.
@@ -211,7 +229,8 @@ def batch_convert(
     arquivos = _coletar_arquivos(origem)
     tarefas, resultados = _preparar_tarefas(arquivos, destino)
     resultados.extend(_executar_paralelo(
-        tarefas, workers, obsidian, sobrescrever, usar_llm, llm_fallback, ignorar_margens
+        tarefas, workers, obsidian, sobrescrever, usar_llm, llm_fallback,
+        ignorar_margens, llm_url, llm_modelo,
     ))
 
     return resultados
@@ -256,6 +275,8 @@ def _executar_paralelo(
     usar_llm: bool,
     llm_fallback: bool,
     ignorar_margens: float = 0.0,
+    llm_url: str | None = None,
+    llm_modelo: str | None = None,
 ) -> list[ResultadoArquivo]:
     """Executa conversões em paralelo via ThreadPoolExecutor e coleta resultados."""
     if not tarefas:
@@ -269,6 +290,7 @@ def _executar_paralelo(
                 _processar_arquivo,
                 str(arq), str(dest), obsidian, sobrescrever,
                 usar_llm, llm_fallback, ignorar_margens,
+                llm_url, llm_modelo,
             ): (arq, dest)
             for arq, dest in tarefas
         }

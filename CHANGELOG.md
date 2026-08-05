@@ -3,6 +3,33 @@
 Based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **LLM provider/model picker in the GUI (Settings window)** — fixes the
+  silent no-op of the AI Enhance toggle in the `.app`: `BatchProcessor` now
+  injects `PDF2MD_LLM_URL/MODEL/KEY` into the process environment. Provider
+  presets (Ollama, Gemini, Groq, OpenRouter, custom), live model list and
+  connection status come from the new `pdf2md llm` subcommands; the API key
+  is stored in the macOS Keychain (never in argv — `ps aux` safe).
+- **CLI flags `--llm-url` / `--llm-modelo`** with precedence flag > env >
+  default, propagated `cli → batch → quality → llm_enhancer` via `ConfigLLM`.
+- **`pdf2md llm modelos --json`** — lists models from the endpoint, with
+  vision capability detection for local Ollama (`/api/show`).
+- **`pdf2md llm testar --json`** — uncached connectivity probe with latency
+  measurement; failure returns `{"ok": false}` with exit 0 (JSON is the GUI
+  contract, no traceback).
+- **ADR-0007**: LLM config decisions D6–D10 (Keychain, env injection, SSRF
+  by design, keychain/ad-hoc signing limitation).
+
+### Security
+
+- Error messages from `llm modelos`/`llm testar` are sanitized (CWE-209/532):
+  only HTTP code or failure category is exposed, never URL/path/credential.
+- API key is transmitted only via `process.environment` (D8) and the
+  Authorization header — never through argv or JSON output.
+
 ## [0.5.0] — 2026-06-29
 
 ### Added

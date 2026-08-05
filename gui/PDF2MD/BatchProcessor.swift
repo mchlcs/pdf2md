@@ -52,7 +52,10 @@ class BatchProcessor: ObservableObject {
         destino: URL?,
         vault: URL?,
         obsidian: Bool,
-        llmFallback: Bool = false
+        llmFallback: Bool = false,
+        llmURL: String? = nil,
+        llmModelo: String? = nil,
+        llmKey: String? = nil
     ) async {
         guard let binario = caminhoBinario else {
             print("Binário pdf2md não encontrado no bundle")
@@ -130,6 +133,17 @@ class BatchProcessor: ObservableObject {
             let processo = Process()
             processo.executableURL = binario
             processo.arguments = args
+
+            // Config do LLM entra no environment do processo (D8) — NUNCA em
+            // argv, que aparece em `ps aux` para qualquer processo do mesmo
+            // usuário (CWE-522). O binário aplica precedência env > default.
+            if llmFallback {
+                var env = ProcessInfo.processInfo.environment
+                if let url = llmURL { env["PDF2MD_LLM_URL"] = url }
+                if let modelo = llmModelo { env["PDF2MD_LLM_MODEL"] = modelo }
+                if let key = llmKey { env["PDF2MD_LLM_KEY"] = key }
+                processo.environment = env
+            }
 
             let stdoutPipe = Pipe()
             let stderrPipe = Pipe()
