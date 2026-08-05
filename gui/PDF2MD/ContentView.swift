@@ -18,12 +18,13 @@ struct ContentView: View {
     @AppStorage(LLMDefaultsKeys.modelo) private var llmModelo = ""
     @AppStorage(LLMDefaultsKeys.urlPersonalizada) private var llmUrlPersonalizada = ""
 
-    /// True quando há provider + key suficientes para o LLM funcionar (D10).
+    /// True quando há provider + key + modelo suficientes para o LLM (D10).
     private var llmConfigurado: Bool {
         LLMProvider.configurado(
             providerRaw: llmProviderRaw,
             urlPersonalizada: llmUrlPersonalizada,
-            chave: KeychainHelper.ler()
+            chave: KeychainHelper.ler(),
+            modelo: llmModelo
         )
     }
 
@@ -100,7 +101,7 @@ struct ContentView: View {
                                         .font(.body)
                                     Text(llmConfigurado
                                          ? "Usa o provedor configurado quando a qualidade está baixa."
-                                         : "Configure um provedor nas Preferências…")
+                                         : "Configure provedor, modelo e chave nas Preferências…")
                                         .font(.caption2)
                                         .foregroundColor(.secondary)
                                 }

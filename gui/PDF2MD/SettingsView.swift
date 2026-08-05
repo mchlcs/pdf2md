@@ -27,40 +27,16 @@ private struct RespostaTeste: Codable {
 
 /// Executa o binário embarcado `pdf2md` com o environment do LLM.
 /// A key viaja no environment — nunca em argv (CWE-522 / `ps aux`).
+/// Drenagem concorrente de pipes via ProcessRunner (sem deadlock).
 enum LLMProbe {
     static func executar(_ args: [String], url: String?, key: String?) async -> Data? {
         guard let binario = Bundle.main.url(forResource: "pdf2md", withExtension: nil) else {
             return nil  // modo dev sem binário embarcado → UI usa lista estática
         }
-        let processo = Process()
-        processo.executableURL = binario
-        processo.arguments = args
-        var env = ProcessInfo.processInfo.environment
+        var env: [String: String] = [:]
         if let url { env["PDF2MD_LLM_URL"] = url }
         if let key { env["PDF2MD_LLM_KEY"] = key }
-        processo.environment = env
-
-        let stdoutPipe = Pipe()
-        let stderrPipe = Pipe()
-        processo.standardOutput = stdoutPipe
-        processo.standardError = stderrPipe
-
-        do {
-            try processo.run()
-        } catch {
-            return nil
-        }
-
-        // Drena stderr concorrentemente para evitar deadlock se o pipe
-        // enche (mesmo padrão do BatchProcessor).
-        return await withCheckedContinuation { continuation in
-            Task.detached {
-                _ = try? stderrPipe.fileHandleForReading.readToEnd()
-                let dados = (try? stdoutPipe.fileHandleForReading.readToEnd()) ?? Data()
-                processo.waitUntilExit()
-                continuation.resume(returning: dados.isEmpty ? nil : dados)
-            }
-        }
+        return await ProcessRunner.executar(binario: binario, args: args, env: env)
     }
 }
 
@@ -75,6 +51,7 @@ struct SettingsView: View {
     @State private var status: String = "Verificando…"
     @State private var statusOk: Bool? = nil
     @State private var chave: String = KeychainHelper.ler() ?? ""
+    @State private var geracao = 0  // descarta respostas atrasadas de providers antigos
 
     private var provider: LLMProvider { LLMProvider(rawValue: providerRaw) ?? .ollama }
     private var urlResolvida: String? {
@@ -133,7 +110,7 @@ struct SettingsView: View {
                             } else {
                                 KeychainHelper.salvar(chave)
                             }
-                            verificarConexao()
+                            recarregar()
                         }
                 }
             }
@@ -178,7 +155,7 @@ struct SettingsView: View {
                     Text(status)
                         .font(.callout)
                     Spacer()
-                    Button("Testar") { verificarConexao() }
+                    Button("Testar") { verificarConexao(geracao: geracao + 1) }
                         .controlSize(.small)
                         .disabled(!configurado)
                 }
@@ -199,7 +176,8 @@ struct SettingsView: View {
         LLMProvider.configurado(
             providerRaw: providerRaw,
             urlPersonalizada: urlPersonalizada,
-            chave: chaveTratada
+            chave: chaveTratada,
+            modelo: modelo
         )
     }
 
@@ -212,13 +190,17 @@ struct SettingsView: View {
     }
 
     /// Recarrega lista de modelos + status de conexão em paralelo.
+    /// Cada gatilho incrementa a geração; respostas obsoletas são descartadas
+    /// (trocar de provider duas vezes rápido não deixa o provider antigo
+    /// sobrescrever a UI do novo).
     private func recarregar() {
+        geracao += 1
         carregandoModelos = true
-        carregarModelos()
-        verificarConexao()
+        carregarModelos(geracao: geracao)
+        verificarConexao(geracao: geracao)
     }
 
-    private func carregarModelos() {
+    private func carregarModelos(geracao: Int) {
         guard let url = urlResolvida, configurado else {
             modelos = []
             modelosEstaticos = true
@@ -227,16 +209,19 @@ struct SettingsView: View {
         }
         Task {
             let dados = await LLMProbe.executar(["llm", "modelos", "--json"], url: url, key: chaveTratada)
+            guard geracao == self.geracao else { return }  // resposta obsoleta
             if let dados,
                let resposta = try? JSONDecoder().decode(RespostaModelos.self, from: dados),
                resposta.ok {
                 await MainActor.run {
+                    guard geracao == self.geracao else { return }
                     modelos = resposta.modelos
                     modelosEstaticos = false
                     carregandoModelos = false
                 }
             } else {
                 await MainActor.run {
+                    guard geracao == self.geracao else { return }
                     modelos = []
                     modelosEstaticos = true
                     carregandoModelos = false
@@ -245,7 +230,7 @@ struct SettingsView: View {
         }
     }
 
-    private func verificarConexao() {
+    private func verificarConexao(geracao: Int) {
         guard let url = urlResolvida, configurado else {
             status = "Sem configuração"
             statusOk = nil
@@ -255,17 +240,20 @@ struct SettingsView: View {
         statusOk = nil
         Task {
             let dados = await LLMProbe.executar(["llm", "testar", "--json"], url: url, key: chaveTratada)
+            guard geracao == self.geracao else { return }  // resposta obsoleta
             if let dados,
                let resposta = try? JSONDecoder().decode(RespostaTeste.self, from: dados),
                resposta.ok,
                let latencia = resposta.latencia_ms {
                 await MainActor.run {
+                    guard geracao == self.geracao else { return }
                     status = "Conectado (\(latencia)ms)"
                     statusOk = true
                 }
             } else {
                 let detalhe = (try? JSONDecoder().decode(RespostaTeste.self, from: dados ?? Data()))?.erro
                 await MainActor.run {
+                    guard geracao == self.geracao else { return }
                     status = "Inacessível\(detalhe.map { " — \($0)" } ?? "")"
                     statusOk = false
                 }

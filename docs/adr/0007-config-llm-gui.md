@@ -22,6 +22,12 @@ modelo e informar API key — decisões travadas aqui:
 | D9 | Modelo sem visão + OCR fallback | Aviso inline no picker ("Groq não tem visão — OCR de imagem fica só no Tesseract") | Evita expectativa quebrada silenciosa |
 | D10 | Sem provider configurado | Toggle **desabilitado** com dica "Configure um provedor" | Melhor que ligar e não fazer nada (bug atual) |
 
+> **Emenda (review PR #20):** D10 foi estendido — "configurado" exige também
+> **modelo selecionado**, não só provider+key. Sem modelo, o Python cairia no
+> default `llama3.2-vision` (404 em Groq/Gemini) e o toggle voltaria a ligar
+> sem efeito. Bundle id do app mantido `com.mchlcs.pdf2md` — trocar zera o
+> `@AppStorage` (D6) em upgrades.
+
 ## Decisão
 
 1. **Precedência flag > env > default.** `ConfigLLM` (dataclass) carrega

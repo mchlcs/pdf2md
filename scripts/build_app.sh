@@ -72,6 +72,7 @@ swiftc -parse-as-library -O \
     gui/PDF2MD/BatchProcessor.swift \
     gui/PDF2MD/LLMConfig.swift \
     gui/PDF2MD/KeychainHelper.swift \
+    gui/PDF2MD/ProcessRunner.swift \
     gui/PDF2MD/SettingsView.swift \
     -o "${APP}/Contents/MacOS/PDF2MD"
 
@@ -91,7 +92,7 @@ cat > "${APP}/Contents/Info.plist" <<PLIST
 <dict>
     <key>CFBundleName</key><string>pdf2md</string>
     <key>CFBundleDisplayName</key><string>pdf2md</string>
-    <key>CFBundleIdentifier</key><string>com.phant0um.pdf2md</string>
+    <key>CFBundleIdentifier</key><string>com.mchlcs.pdf2md</string>
     <key>CFBundleVersion</key><string>${BUILD_NUM}</string>
     <key>CFBundleShortVersionString</key><string>${VERSAO}</string>
     <key>CFBundlePackageType</key><string>APPL</string>

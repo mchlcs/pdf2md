@@ -144,11 +144,9 @@ def test_disponivel_false_sem_env():
 
 
 def test_disponivel_true_quando_endpoint_responde():
-    """Retorna True quando endpoint acessível."""
+    """Retorna True quando endpoint acessível (GET /models com JSON válido)."""
     disponivel.cache_clear()
-    mock_resp = MagicMock()
-    mock_resp.__enter__ = lambda s: s
-    mock_resp.__exit__ = MagicMock(return_value=False)
+    mock_resp = _mock_models_response([])
     with (
         patch.dict("os.environ", {"PDF2MD_LLM_URL": "http://localhost:11434/v1"}),
         patch("urllib.request.urlopen", return_value=mock_resp),
@@ -368,12 +366,9 @@ def test_disponivel_probe_com_config_mesmo_sem_env():
     do no-op silencioso no .app).
     """
     disponivel.cache_clear()
-    mock_resp = MagicMock()
-    mock_resp.__enter__ = lambda s: s
-    mock_resp.__exit__ = MagicMock(return_value=False)
     with (
         patch.dict("os.environ", {}, clear=True),
-        patch("urllib.request.urlopen", return_value=mock_resp),
+        patch("urllib.request.urlopen", return_value=_mock_models_response([])),
     ):
         assert disponivel(ConfigLLM(url="http://localhost:11434/v1")) is True
     disponivel.cache_clear()

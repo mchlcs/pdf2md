@@ -82,10 +82,13 @@ enum LLMProvider: String, CaseIterable, Identifiable {
     }
 
     /// True quando há configuração suficiente para converter com LLM (D10).
-    /// "Configurado" = URL http(s) válida + key presente quando o provider exige.
-    static func configurado(providerRaw: String, urlPersonalizada: String, chave: String?) -> Bool {
+    /// "Configurado" = URL http(s) válida + key presente quando o provider
+    /// exige + MODELO selecionado — sem modelo, o Python cairia no default
+    /// llama3.2-vision (404 em Groq/Gemini) e o toggle ligaria sem efeito.
+    static func configurado(providerRaw: String, urlPersonalizada: String, chave: String?, modelo: String) -> Bool {
         guard let url = urlResolvida(providerRaw: providerRaw, urlPersonalizada: urlPersonalizada),
-              url.hasPrefix("http://") || url.hasPrefix("https://") else {
+              url.hasPrefix("http://") || url.hasPrefix("https://"),
+              !modelo.trimmingCharacters(in: .whitespaces).isEmpty else {
             return false
         }
         let provider = LLMProvider(rawValue: providerRaw) ?? .ollama

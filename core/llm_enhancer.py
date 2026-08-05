@@ -67,7 +67,6 @@ class ConfigLLM:
     url: str | None = None
     modelo: str | None = None
     key: str | None = None
-    timeout: int | None = None
 
 
 class ModeloLLMInfo(TypedDict):
@@ -126,9 +125,7 @@ def _key(config: ConfigLLM | None = None) -> str:
     return os.getenv("PDF2MD_LLM_KEY", "ollama")
 
 
-def _timeout(config: ConfigLLM | None = None) -> int:
-    if config is not None and config.timeout is not None:
-        return config.timeout
+def _timeout() -> int:
     try:
         return int(os.getenv("PDF2MD_LLM_TIMEOUT", str(_TIMEOUT_PADRAO)))
     except ValueError:
@@ -185,11 +182,13 @@ def _completar(mensagens: list[dict], config: ConfigLLM | None = None) -> str:
         method="POST",
     )
 
-    with urllib.request.urlopen(req, timeout=_timeout(config)) as resp:
+    with urllib.request.urlopen(req, timeout=_timeout()) as resp:
         data = json.loads(resp.read().decode("utf-8"))
 
     conteudo = data["choices"][0]["message"]["content"]
-    assert isinstance(conteudo, str)
+    if not isinstance(conteudo, str):
+        # Não usa assert: some sob `python -O` e o contrato exige str.
+        raise TypeError("resposta do LLM em formato inesperado")
     return conteudo
 
 
@@ -207,6 +206,20 @@ def _erro_seguro(exc: Exception) -> str:
     if isinstance(exc, urllib.error.URLError):
         return "servidor inacessível"
     return type(exc).__name__
+
+
+def _get_models(config: ConfigLLM | None, timeout: int) -> dict | None:
+    """
+    GET {url}/models com auth — shape único compartilhado por
+    disponivel()/testar()/listar_modelos() (sem triplicação de Request).
+    Devolve o JSON do endpoint ou None se a resposta não for dict.
+    """
+    req = urllib.request.Request(
+        f"{_url(config)}/models", method="GET", headers=_cabecalhos_auth(config)
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        dados = json.loads(resp.read().decode("utf-8"))
+    return dados if isinstance(dados, dict) else None
 
 
 # ── API pública ───────────────────────────────────────────────────────────────
@@ -233,11 +246,7 @@ def disponivel(config: ConfigLLM | None = None) -> bool:
     if url == _URL_PADRAO and url_explicita is None:
         return False
     try:
-        req = urllib.request.Request(
-            f"{url}/models", method="GET", headers=_cabecalhos_auth(config)
-        )
-        with urllib.request.urlopen(req, timeout=_TIMEOUT_VERIFICACAO):
-            return True
+        return _get_models(config, _TIMEOUT_VERIFICACAO) is not None
     except Exception:
         return False
 
@@ -253,18 +262,17 @@ def testar(config: ConfigLLM | None = None) -> ResultadoTeste:
         — "erro" é mensagem segura (CWE-209), nunca a exceção bruta.
     """
     try:
-        url = _url(config)
+        _url(config)  # valida antes de medir (SSRF/CWE-918)
     except ValueError as exc:
         return {"ok": False, "latencia_ms": None, "erro": str(exc)}
 
     inicio = time.perf_counter()
     try:
-        req = urllib.request.Request(
-            f"{url}/models", method="GET", headers=_cabecalhos_auth(config)
-        )
-        with urllib.request.urlopen(req, timeout=_TIMEOUT_VERIFICACAO):
-            latencia_ms = int((time.perf_counter() - inicio) * 1000)
-            return {"ok": True, "latencia_ms": latencia_ms, "erro": None}
+        dados = _get_models(config, _TIMEOUT_VERIFICACAO)
+        latencia_ms = int((time.perf_counter() - inicio) * 1000)
+        if dados is None:
+            return {"ok": False, "latencia_ms": None, "erro": "resposta inesperada"}
+        return {"ok": True, "latencia_ms": latencia_ms, "erro": None}
     except Exception as exc:
         return {"ok": False, "latencia_ms": None, "erro": _erro_seguro(exc)}
 
@@ -329,11 +337,9 @@ def listar_modelos(
         return None, str(exc)
 
     try:
-        req = urllib.request.Request(
-            f"{url}/models", method="GET", headers=_cabecalhos_auth(config)
-        )
-        with urllib.request.urlopen(req, timeout=_TIMEOUT_MODELOS) as resp:
-            dados = json.loads(resp.read().decode("utf-8"))
+        dados = _get_models(config, _TIMEOUT_MODELOS)
+        if dados is None:
+            return None, "resposta inesperada"
         ids = sorted(
             item["id"] for item in dados.get("data", []) if item.get("id")
         )

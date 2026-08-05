@@ -141,6 +141,7 @@ def converter(
     # Lazy imports: só carrega deps pesadas quando o comando é executado
     from core.batch import StatusArquivo, batch_convert
     from core.image_converter import verificar_tesseract
+    from core.llm_enhancer import ConfigLLM
 
     # Validação de segurança
     try:
@@ -168,6 +169,12 @@ def converter(
     if vault is not None:
         obsidian = True
 
+    # Config LLM: flag > env > default — None preserva o comportamento env-only
+    llm_config = (
+        ConfigLLM(url=llm_url, modelo=llm_modelo)
+        if (llm_url or llm_modelo) else None
+    )
+
     inicio = time.perf_counter()
     try:
         with Progress(
@@ -193,8 +200,7 @@ def converter(
                     usar_llm=usar_llm,
                     llm_fallback=llm_fallback,
                     ignorar_margens=ignorar_margens,
-                    llm_url=llm_url,
-                    llm_modelo=llm_modelo,
+                    llm_config=llm_config,
                 )
             progress.update(task, total=len(resultados), completed=len(resultados))
     except (FileNotFoundError, NotADirectoryError) as exc:

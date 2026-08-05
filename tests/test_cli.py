@@ -97,8 +97,9 @@ def test_cli_converter_flags_llm_propagadas(tmp_path):
 
     assert result.exit_code == 0
     chamada = batch_mock.call_args
-    assert chamada.kwargs["llm_url"] == "http://localhost:11434/v1"
-    assert chamada.kwargs["llm_modelo"] == "llama3.2-vision"
+    config = chamada.kwargs["llm_config"]
+    assert config.url == "http://localhost:11434/v1"
+    assert config.modelo == "llama3.2-vision"
 
 
 def test_cli_converter_sem_flags_llm_passa_none(tmp_path):
@@ -113,9 +114,7 @@ def test_cli_converter_sem_flags_llm_passa_none(tmp_path):
         result = runner.invoke(app, ["converter", str(origem), str(tmp_path)])
 
     assert result.exit_code == 0
-    chamada = batch_mock.call_args
-    assert chamada.kwargs["llm_url"] is None
-    assert chamada.kwargs["llm_modelo"] is None
+    assert batch_mock.call_args.kwargs["llm_config"] is None
 
 
 def test_cli_converter_ajuda_mostra_flags_llm():
