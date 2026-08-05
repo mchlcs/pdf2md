@@ -76,7 +76,7 @@ The CLI equivalent uses environment variables — see CLI section below.
 
 ```bash
 # Install
-pip3 install "pdf2md[dev]"  # or: uv sync
+uv sync --extra dev
 
 # Convert single file
 pdf2md file.pdf output/
