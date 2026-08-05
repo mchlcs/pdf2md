@@ -1,11 +1,13 @@
 """Testes para core/converter.py."""
 from pathlib import Path
+from unittest.mock import patch
 
 import fitz
 import pytest
 from PIL import Image, ImageDraw
 
 from core.converter import pdf_to_md
+from core.utils import ModoImagem
 
 
 def test_pdf_texto_simples(fixture_texto_simples):
@@ -72,6 +74,134 @@ def test_pdf_misto_texto_imagem(tmp_path, mock_tesseract):
 
     md = pdf_to_md(path)
     assert len(md) > 20
+
+
+# ── Feature --imagens (T3/T5) ────────────────────────────────────────────────
+
+def _pdf_texto_com_imagens(tmp_path: Path, qtd: int = 2) -> Path:
+    """PDF com texto nativo + `qtd` imagens embutidas."""
+    path = tmp_path / "imagens.pdf"
+    doc = fitz.open()
+    pagina = doc.new_page(width=595, height=842)
+    pagina.insert_text(
+        (50, 150),
+        "Página com texto nativo e imagens embutidas para testar a extração de assets.",
+    )
+    for i in range(qtd):
+        img = Image.new("RGB", (40, 40), color=((i * 90) % 255, 60, 120))
+        img_path = tmp_path / f"emb_{i}.png"
+        img.save(img_path)
+        pagina.insert_image(fitz.Rect(50 + i * 60, 50, 90 + i * 60, 90), filename=str(img_path))
+    doc.save(str(path))
+    doc.close()
+    return path
+
+
+def test_pdf_imagens_extrair_gera_assets_e_links(tmp_path):
+    """Modo extrair: 2 PNGs em disco + 2 links ![]() no MD."""
+    pdf = _pdf_texto_com_imagens(tmp_path, qtd=2)
+    saida = tmp_path / "out"
+    assets = saida / "imagens_assets"
+    saida.mkdir()
+
+    md = pdf_to_md(pdf, modo_imagem=ModoImagem.extrair, assets_dir=assets, md_dir=saida)
+
+    assert md.count("![imagem](") == 2
+    assert "imagens_assets/img_p001_0.png" in md
+    assert "imagens_assets/img_p001_1.png" in md
+    assert len(list(assets.iterdir())) == 2
+
+
+def test_pdf_default_byte_identico_e_sem_assets(tmp_path):
+    """Default = transcrever: byte-idêntico ao atual e nada escrito em disco."""
+    pdf = _pdf_texto_com_imagens(tmp_path)
+
+    md_default = pdf_to_md(pdf)
+    md_explicito = pdf_to_md(pdf, modo_imagem=ModoImagem.transcrever)
+
+    assert md_default == md_explicito
+    assert not (tmp_path / "imagens_assets").exists()
+
+
+def test_pdf_imagens_ambos_ocr_como_alt_text(tmp_path):
+    """Modo ambos: OCR da imagem vira alt-text do link."""
+    pdf = _pdf_texto_com_imagens(tmp_path, qtd=1)
+
+    with patch("core.converter.image_to_md", return_value="TEXTO OCR DA IMAGEM"):
+        md = pdf_to_md(pdf, modo_imagem=ModoImagem.ambos)
+
+    assert "![TEXTO OCR DA IMAGEM](imagens_assets/img_p001_0.png)" in md
+
+
+def test_pdf_scan_extrair_persiste_render(tmp_path, mock_tesseract):
+    """Página-scan em extrair: render 300dpi persistido como p001_full.png (D3)."""
+    path = tmp_path / "scan.pdf"
+    img = Image.new("RGB", (400, 200), color="white")
+    draw = ImageDraw.Draw(img)
+    draw.text((10, 80), "Página escaneada", fill="black")
+    img_path = tmp_path / "scan.png"
+    img.save(img_path)
+    doc = fitz.open()
+    pagina = doc.new_page(width=400, height=200)
+    pagina.insert_image(fitz.Rect(0, 0, 400, 200), filename=str(img_path))
+    doc.save(str(path))
+    doc.close()
+
+    saida = tmp_path / "out"
+    assets = saida / "scan_assets"
+    saida.mkdir()
+
+    md = pdf_to_md(path, modo_imagem=ModoImagem.extrair, assets_dir=assets, md_dir=saida)
+
+    assert (assets / "p001_full.png").exists()
+    assert "![página 1](scan_assets/p001_full.png)" in md
+
+
+def test_pdf_imagens_ignorar_descarta_sem_ocr(tmp_path, monkeypatch):
+    """Modo ignorar em página-scan: sem OCR e sem render persistido."""
+    chamadas_ocr: list = []
+
+    def spy(image, lang=None, config=None):
+        chamadas_ocr.append(image)
+        return "Texto OCR mockado"
+
+    monkeypatch.setattr("pytesseract.image_to_string", spy)
+    monkeypatch.setattr("core.image_converter.verificar_tesseract", lambda: True)
+
+    path = tmp_path / "scan.pdf"
+    img = Image.new("RGB", (400, 200), color="white")
+    img_path = tmp_path / "scan.png"
+    img.save(img_path)
+    doc = fitz.open()
+    pagina = doc.new_page(width=400, height=200)
+    pagina.insert_image(fitz.Rect(0, 0, 400, 200), filename=str(img_path))
+    doc.save(str(path))
+    doc.close()
+
+    md = pdf_to_md(path, modo_imagem=ModoImagem.ignorar)
+
+    assert md.strip() == ""
+    assert chamadas_ocr == []
+    assert not (tmp_path / "scan_assets").exists()
+
+
+def test_pdf_imagens_obsidian_wikilink_e_attachments(tmp_path):
+    """Modo obsidian (D1): wikilink ![[...]] + arquivo na pasta de attachments."""
+    pdf = _pdf_texto_com_imagens(tmp_path, qtd=1)
+    vault = tmp_path / "vault"
+    (vault / "attachments").mkdir(parents=True)
+
+    md = pdf_to_md(
+        pdf,
+        modo_imagem=ModoImagem.extrair,
+        assets_dir=vault / "attachments",
+        md_dir=vault,
+        wikilinks=True,
+        prefixo_nome="imagens__",
+    )
+
+    assert "![[imagens__img_p001_0.png]]" in md
+    assert (vault / "attachments" / "imagens__img_p001_0.png").exists()
 
 
 # ── Funções extraídas (Ciclo 9) ──────────────────────────────────────────────

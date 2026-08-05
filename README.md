@@ -105,10 +105,37 @@ pdf2md docs/ output/ --llm
 # Ignore page headers and footers (5% of page height from top and bottom)
 pdf2md document.pdf output/ --ignorar-margens 5
 
+# Extract embedded images as files (PDF only) + link them in the MD
+pdf2md document.pdf output/ --imagens extrair
+
+# Extract + OCR each image as the link's alt-text
+pdf2md document.pdf output/ --imagens ambos
+
+# Discard images without OCR (scanned pages produce no text)
+pdf2md document.pdf output/ --imagens ignorar
+
+# Custom assets folder (shared across files — names get a per-file prefix)
+pdf2md docs/ output/ --imagens extrair --assets-dir ~/assets
+
 # Diagnose the LLM endpoint (used by the GUI picker)
 pdf2md llm modelos --json    # → {"ok":true,"modelos":[{"id":"...","visao":true}]}
 pdf2md llm testar --json     # → {"ok":true,"latencia_ms":42}
 ```
+
+### `--imagens` (embedded images, PDF only)
+
+| Mode | Behavior |
+|------|----------|
+| `transcrever` (default) | Current behavior — byte-identical output, OCR for scanned pages |
+| `extrair` | Saves images as files in `<stem>_assets/` next to the MD and links `![](...)`. Scanned pages persist the 300dpi render as `pNNN_full.png` |
+| `ambos` | `extrair` + OCR of each image as the link's alt-text |
+| `ignorar` | Discards images without OCR |
+
+- With `--obsidian`, assets go to `vault/attachments/` and links become wikilinks `![[...]]`.
+- Identical images are deduplicated by SHA-256 (1 file, N links).
+- Security: filenames are always generated (never from PDF metadata), symlinked
+  assets dirs are refused, and hard limits apply (500 images/doc, 50 MB/image).
+- Non-PDF files are converted normally with a warning (PDF-only feature).
 
 ### LLM configuration
 

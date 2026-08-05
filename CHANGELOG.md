@@ -7,6 +7,20 @@ Versioning follows [SemVer](https://semver.org/).
 
 ### Added
 
+- **`--imagens transcrever|extrair|ambos|ignorar`** (PDF-only): política de
+  imagens embutidas. `extrair` salva os assets (default `<stem>_assets/`) e
+  linka `![](...)`; `ambos` extrai e usa OCR como alt-text; `ignorar`
+  descarta sem OCR; default `transcrever` é byte-idêntico ao atual.
+  `--assets-dir` sobrescreve o diretório; `--obsidian` usa
+  `vault/attachments/` com wikilinks `![[...]]`.
+- **Segurança de extração** (ADR-0005): nomes sempre gerados (nunca do
+  metadado do PDF), dedup por SHA-256, limites anti resource-bomb (500
+  imagens/documento, 50 MB/imagem), recusa de symlink no assets dir, ext
+  exótica normalizada para PNG.
+- **`core/pdf_images.py`** com 8 testes (extração, dedup, limites, nome
+  hostil, symlink, PDF sem imagem).
+- **ADR-0005**: decisões D1–D5 (destino, base64 rejeitado, render de scan,
+  dedup, nomenclatura).
 - **LLM provider/model picker in the GUI (Settings window)** — fixes the
   silent no-op of the AI Enhance toggle in the `.app`: `BatchProcessor` now
   injects `PDF2MD_LLM_URL/MODEL/KEY` into the process environment. Provider
@@ -29,6 +43,8 @@ Versioning follows [SemVer](https://semver.org/).
   only HTTP code or failure category is exposed, never URL/path/credential.
 - API key is transmitted only via `process.environment` (D8) and the
   Authorization header — never through argv or JSON output.
+- Image extraction hardening (ADR-0005): path traversal, symlink and
+  resource-bomb mitigations with tests proving each one.
 
 ## [0.5.0] — 2026-06-29
 

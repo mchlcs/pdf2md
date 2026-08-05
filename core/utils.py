@@ -2,6 +2,7 @@
 Utilitários de segurança e validação para pdf2md.
 """
 import re
+from enum import StrEnum
 from pathlib import Path, PurePosixPath
 
 # Casa qualquer path absoluto (1+ segmentos), incluindo segmentos com
@@ -42,6 +43,28 @@ EXTENSOES_PLANILHA: frozenset[str] = frozenset({".xlsx", ".csv"})
 EXTENSOES_PERMITIDAS: frozenset[str] = (
     EXTENSOES_PDF | EXTENSOES_IMAGEM | EXTENSOES_DOC | EXTENSOES_PPTX | EXTENSOES_PLANILHA
 )
+
+
+# ── Feature `--imagens` (PDF-only): política de imagens embutidas ─────────────
+
+class ModoImagem(StrEnum):
+    """
+    Política de tratamento das imagens embutidas em PDFs (flag --imagens).
+
+    PDF-only: outros formatos ignoram a flag (warning no batch).
+    """
+
+    transcrever = "transcrever"  # default — OCR só de páginas-scan (byte-idêntico ao atual)
+    extrair = "extrair"          # salva os assets e linka ![](assets/...) no MD
+    ambos = "ambos"              # extrai + OCR da imagem como alt-text
+    ignorar = "ignorar"          # descarta imagens sem OCR
+
+
+# Limites anti resource-bomb (gate Sentinel, T6):
+# PDF malicioso pode embutir 10k imagens ou 1 imagem de 2 GB.
+_MAX_IMAGENS_PDF = 500           # máx. imagens extraídas por documento
+_MAX_BYTES_IMAGEM = 50 * 1024 * 1024  # máx. bytes por imagem (50 MB)
+_MAX_BYTES_RENDER_PAGINA = 50 * 1024 * 1024  # máx. bytes por render de página-scan
 
 
 # ── Helpers de validação reutilizáveis (DRY — usados por todos conversores) ──

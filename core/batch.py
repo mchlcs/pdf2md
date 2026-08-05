@@ -22,6 +22,7 @@ from core.utils import (
     EXTENSOES_PERMITIDAS,
     EXTENSOES_PLANILHA,
     EXTENSOES_PPTX,
+    ModoImagem,
     sanitizar_mensagem_erro,
     validar_path_seguro,
 )
@@ -87,6 +88,8 @@ def _processar_arquivo(
     llm_fallback: bool = False,
     ignorar_margens: float = 0.0,
     llm_config: ConfigLLM | None = None,
+    modo_imagem: ModoImagem = ModoImagem.transcrever,
+    assets_dir_str: str | None = None,
 ) -> dict:
     """
     Worker executado em ThreadPoolExecutor. Recebe/retorna tipos simples
@@ -99,12 +102,17 @@ def _processar_arquivo(
         return _resultado_ignorado(origem_str, destino_str)
 
     try:
-        md = _converter_arquivo(origem, ignorar_margens)
+        avisos_imagens: list[str] = []
+        md = _converter_arquivo(
+            origem, ignorar_margens, modo_imagem, destino,
+            obsidian, assets_dir_str, avisos_imagens,
+        )
         if md is None:
             return _resultado_ignorado(origem_str, None)
         md, avisos = aplicar_pipeline_qualidade(
             md, origem, usar_llm, llm_fallback, llm_config
         )
+        avisos = avisos_imagens + avisos
 
         if obsidian:
             md = add_obsidian_frontmatter(md, origem)
@@ -123,18 +131,79 @@ def _processar_arquivo(
         return _resultado_erro(origem_str, exc)
 
 
-def _converter_arquivo(origem: Path, ignorar_margens: float = 0.0) -> str | None:
-    """Despacha para o conversor correto baseado na extensão. None = não suportado."""
+def _converter_arquivo(
+    origem: Path,
+    ignorar_margens: float = 0.0,
+    modo_imagem: ModoImagem = ModoImagem.transcrever,
+    destino: Path | None = None,
+    obsidian: bool = False,
+    assets_dir_str: str | None = None,
+    avisos: list[str] | None = None,
+) -> str | None:
+    """
+    Despacha para o conversor correto baseado na extensão. None = não suportado.
+
+    `--imagens` é PDF-only: só pdf_to_md recebe o modo (padrão de
+    `ignorar_margens`); outros formatos ganham um aviso, não erro.
+    """
     sufixo = origem.suffix.lower()
     conversor = next(
         (fn for exts, fn in _CONVERSORES if sufixo in exts), None
     )
     if conversor is None:
         return None
-    # Apenas pdf_to_md aceita ignorar_margens; outros conversores ignoram o parâmetro
-    if conversor is pdf_to_md and ignorar_margens > 0:
-        return pdf_to_md(origem, ignorar_margens=ignorar_margens)
+    if conversor is pdf_to_md:
+        return _pdf_to_md(
+            origem, ignorar_margens, modo_imagem,
+            destino, obsidian, assets_dir_str, avisos,
+        )
+    if modo_imagem != ModoImagem.transcrever and avisos is not None:
+        avisos.append("--imagens só se aplica a PDFs — modo ignorado para este arquivo")
     return conversor(origem)
+
+
+def _pdf_to_md(
+    origem: Path,
+    ignorar_margens: float,
+    modo_imagem: ModoImagem,
+    destino: Path | None,
+    obsidian: bool,
+    assets_dir_str: str | None,
+    avisos: list[str] | None,
+) -> str:
+    """
+    Resolve o destino dos assets (D1) e chama pdf_to_md.
+
+    - default: `<stem>_assets/` ao lado do .md
+    - `--assets-dir` explícito: diretório compartilhado → prefixo por stem
+      (sem colisão de img_p001_0.png sob ThreadPool)
+    - Obsidian: vault/attachments + wikilinks (D1)
+    """
+    if modo_imagem == ModoImagem.transcrever:
+        return pdf_to_md(origem, ignorar_margens=ignorar_margens)
+
+    # No batch, `destino` é o caminho do .md (arquivo) — o diretório é .parent
+    destino_efetivo = destino.parent if destino else origem.parent
+    if assets_dir_str:
+        assets = Path(assets_dir_str)
+        prefixo = f"{origem.stem}__"
+    elif obsidian:
+        assets = destino_efetivo / "attachments"
+        prefixo = f"{origem.stem}__"
+    else:
+        assets = destino_efetivo / f"{origem.stem}_assets"
+        prefixo = ""
+
+    return pdf_to_md(
+        origem,
+        ignorar_margens=ignorar_margens,
+        modo_imagem=modo_imagem,
+        assets_dir=assets,
+        md_dir=destino_efetivo,
+        wikilinks=obsidian,
+        prefixo_nome=prefixo,
+        avisos=avisos,
+    )
 
 
 def _resultado_ignorado(origem_str: str, destino_str: str | None) -> dict:
@@ -171,6 +240,8 @@ def batch_convert(
     llm_fallback: bool = False,
     ignorar_margens: float = 0.0,
     llm_config: ConfigLLM | None = None,
+    modo_imagem: ModoImagem = ModoImagem.transcrever,
+    assets_dir: Path | None = None,
 ) -> list[ResultadoArquivo]:
     """
     Converte todos os arquivos suportados em `origem` para Markdown em `destino`.
@@ -217,7 +288,7 @@ def batch_convert(
     tarefas, resultados = _preparar_tarefas(arquivos, destino)
     resultados.extend(_executar_paralelo(
         tarefas, workers, obsidian, sobrescrever, usar_llm, llm_fallback,
-        ignorar_margens, llm_config,
+        ignorar_margens, llm_config, modo_imagem, assets_dir,
     ))
 
     return resultados
@@ -263,6 +334,8 @@ def _executar_paralelo(
     llm_fallback: bool,
     ignorar_margens: float = 0.0,
     llm_config: ConfigLLM | None = None,
+    modo_imagem: ModoImagem = ModoImagem.transcrever,
+    assets_dir: Path | None = None,
 ) -> list[ResultadoArquivo]:
     """Executa conversões em paralelo via ThreadPoolExecutor e coleta resultados."""
     if not tarefas:
@@ -277,6 +350,7 @@ def _executar_paralelo(
                 str(arq), str(dest), obsidian, sobrescrever,
                 usar_llm, llm_fallback, ignorar_margens,
                 llm_config,
+                modo_imagem, str(assets_dir) if assets_dir else None,
             ): (arq, dest)
             for arq, dest in tarefas
         }

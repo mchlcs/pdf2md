@@ -9,6 +9,7 @@ from unittest.mock import patch
 from typer.testing import CliRunner
 
 from core.cli import app
+from core.utils import ModoImagem
 
 runner = CliRunner()
 
@@ -123,6 +124,52 @@ def test_cli_converter_ajuda_mostra_flags_llm():
     assert result.exit_code == 0
     assert "--llm-url" in _sem_ansi(result.stdout)
     assert "--llm-modelo" in _sem_ansi(result.stdout)
+
+
+# ── Flags --imagens / --assets-dir (T4) ──────────────────────────────────────
+
+def test_cli_converter_flags_imagens_propagadas(tmp_path):
+    """--imagens e --assets-dir chegam ao batch_convert."""
+    origem = tmp_path / "documento.docx"
+    origem.write_text("dummy")  # docx → sem checagem de Tesseract
+
+    with (
+        patch("core.batch.batch_convert", return_value=[]) as batch_mock,
+        patch("core.cli.Progress"),
+    ):
+        result = runner.invoke(app, [
+            "converter", str(origem), str(tmp_path),
+            "--imagens", "extrair",
+            "--assets-dir", str(tmp_path / "assets"),
+        ])
+
+    assert result.exit_code == 0
+    chamada = batch_mock.call_args
+    assert chamada.kwargs["modo_imagem"].value == "extrair"
+    assert chamada.kwargs["assets_dir"] == tmp_path / "assets"
+
+
+def test_cli_converter_imagens_padrao_transcrever(tmp_path):
+    """Sem --imagens → ModoImagem.transcrever (backward-compatible)."""
+    origem = tmp_path / "documento.docx"
+    origem.write_text("dummy")
+
+    with (
+        patch("core.batch.batch_convert", return_value=[]) as batch_mock,
+        patch("core.cli.Progress"),
+    ):
+        result = runner.invoke(app, ["converter", str(origem), str(tmp_path)])
+
+    assert result.exit_code == 0
+    assert batch_mock.call_args.kwargs["modo_imagem"] == ModoImagem.transcrever
+
+
+def test_cli_converter_ajuda_mostra_imagens():
+    """--help do converter lista --imagens e --assets-dir."""
+    result = runner.invoke(app, ["converter", "--help"])
+    assert result.exit_code == 0
+    assert "--imagens" in _sem_ansi(result.stdout)
+    assert "--assets-dir" in _sem_ansi(result.stdout)
 
 
 # ── Subcomandos llm (T9) ─────────────────────────────────────────────────────

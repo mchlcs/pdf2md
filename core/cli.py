@@ -26,7 +26,12 @@ from rich.progress import (
 )
 from rich.table import Table
 
-from core.utils import EXTENSOES_IMAGEM, EXTENSOES_PDF, validar_path_seguro
+from core.utils import (
+    EXTENSOES_IMAGEM,
+    EXTENSOES_PDF,
+    ModoImagem,
+    validar_path_seguro,
+)
 
 app = typer.Typer(
     name="pdf2md",
@@ -133,6 +138,17 @@ def converter(
         None, "--llm-modelo",
         help="Modelo LLM (precedência: flag > PDF2MD_LLM_MODEL > llama3.2-vision).",
     ),
+    imagens: ModoImagem = typer.Option(
+        ModoImagem.transcrever, "--imagens",
+        help="Política de imagens embutidas em PDFs: transcrever (OCR de scans), "
+             "extrair (salva assets + links), ambos (extrai + OCR no alt-text) ou "
+             "ignorar (descarta sem OCR). Só se aplica a PDFs.",
+    ),
+    assets_dir: Path | None = typer.Option(
+        None, "--assets-dir",
+        help="Diretório dos assets extraídos (--imagens extrair|ambos). "
+             "Default: '<stem>_assets/' ao lado do .md; com --obsidian, vault/attachments/.",
+    ),
 ) -> None:
     """
     Converte PDFs e imagens em Markdown.
@@ -201,6 +217,8 @@ def converter(
                     llm_fallback=llm_fallback,
                     ignorar_margens=ignorar_margens,
                     llm_config=llm_config,
+                    modo_imagem=imagens,
+                    assets_dir=assets_dir,
                 )
             progress.update(task, total=len(resultados), completed=len(resultados))
     except (FileNotFoundError, NotADirectoryError) as exc:
