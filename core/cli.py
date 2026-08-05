@@ -6,6 +6,7 @@ Uso: pdf2md INPUT OUTPUT [opções]
      pdf2md planilha.xlsx saida/
      pdf2md pasta/docs/ pasta/markdowns/ --workers 8
      pdf2md docs/ --vault ~/Obsidian/vault-michel
+     pdf2md llm modelos|testar --json
 """
 import json
 import os
@@ -38,6 +39,25 @@ app = typer.Typer(
     help="Converte PDFs, imagens e documentos Word em Markdown. Suporte a batch e Obsidian vault.",
     add_completion=False,
 )
+
+# Comandos de topo — o primeiro arg que não estiver aqui é tratado como ORIGEM
+# (default-command: pdf2md <arquivo> <destino> dispensa o subcomando converter).
+_COMANDOS_TOPO = frozenset({"converter", "llm", "--help", "-h", "--version", "--completion"})
+
+
+def main() -> None:
+    """
+    Entry point real (console script `pdf2md`).
+
+    Default-command: quando o primeiro argumento não é um comando/subcomando
+    conhecido, injeta `converter` — a forma `pdf2md <arquivo> <destino>` é a
+    canônica (README + GUI BatchProcessor). O click vendored do Typer 0.26
+    não suporta args de grupo + subcomandos na mesma árvore, então o
+    default-command é resolvido aqui, antes do parser.
+    """
+    if len(sys.argv) > 1 and sys.argv[1] not in _COMANDOS_TOPO and not sys.argv[1].startswith("-"):
+        sys.argv.insert(1, "converter")
+    app()
 console = Console(stderr=True)
 
 
@@ -151,7 +171,7 @@ def converter(
     ),
 ) -> None:
     """
-    Converte PDFs e imagens em Markdown.
+    Converte PDFs, imagens, Word, PPTX e planilhas em Markdown.
     --vault implica --obsidian automaticamente.
     """
     # Lazy imports: só carrega deps pesadas quando o comando é executado
@@ -380,5 +400,8 @@ def llm_testar(
 
 app.add_typer(llm_app)
 
+# Guard no FINAL do módulo: no binário PyInstaller o módulo é executado como
+# `__main__` — se este guard rodasse no topo, chamaria app() antes do
+# add_typer(llm_app) e o app congelado ficaria sem comandos.
 if __name__ == "__main__":
-    app()
+    main()
