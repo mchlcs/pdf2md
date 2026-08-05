@@ -5,6 +5,7 @@ import pytest
 from PIL import Image, ImageDraw
 
 from core.batch import StatusArquivo, batch_convert
+from core.utils import ModoImagem
 
 
 def test_batch_arquivo_unico(fixture_texto_simples, tmp_path):
@@ -229,3 +230,229 @@ def test_batch_colisao_stem_nao_perde_dados(tmp_path):
     for d in destinos:
         assert d is not None and d.exists()
         assert d.read_text(encoding="utf-8").strip() != ""
+
+
+# ── Feature --imagens (T4): propagação e assets por arquivo ──────────────────
+
+def _pdf_com_imagem_e_texto(tmp_path, nome: str) -> fitz.Document:
+    """Cria PDF com texto nativo + 1 imagem embutida (cor distinta por nome)."""
+    path = tmp_path / f"{nome}.pdf"
+    doc = fitz.open()
+    p = doc.new_page(width=595, height=842)
+    p.insert_text(
+        (50, 150),
+        "Documento com texto nativo e imagem embutida para testes de assets do batch.",
+    )
+    cor = ((hash(nome) % 200) + 20, 40, 90)
+    img = Image.new("RGB", (40, 40), color=cor)
+    img_path = tmp_path / f"{nome}_img.png"
+    img.save(img_path)
+    p.insert_image(fitz.Rect(50, 50, 90, 90), filename=str(img_path))
+    doc.save(str(path))
+    doc.close()
+    return path
+
+
+def test_batch_imagens_extrair_assets_por_arquivo(tmp_path):
+    """--imagens extrair: assets por arquivo em <stem>_assets/, sem colisão."""
+    entrada = tmp_path / "entrada"
+    entrada.mkdir()
+    _pdf_com_imagem_e_texto(entrada, "alfa")
+    _pdf_com_imagem_e_texto(entrada, "beta")
+
+    resultados = batch_convert(
+        origem=entrada,
+        destino=tmp_path / "saida",
+        workers=2,
+        modo_imagem=ModoImagem.extrair,
+    )
+
+    assert all(r.status == StatusArquivo.CONCLUIDO for r in resultados)
+    for stem in ("alfa", "beta"):
+        assets = tmp_path / "saida" / f"{stem}_assets"
+        assert (assets / "img_p001_0.png").exists()
+        md = (tmp_path / "saida" / f"{stem}.md").read_text(encoding="utf-8")
+        assert f"{stem}_assets/img_p001_0.png" in md
+
+
+def test_batch_imagens_assets_compartilhado_com_prefixo(tmp_path):
+    """--assets-dir compartilhado: prefixo por stem evita colisão (T4)."""
+    entrada = tmp_path / "entrada"
+    entrada.mkdir()
+    _pdf_com_imagem_e_texto(entrada, "alfa")
+    _pdf_com_imagem_e_texto(entrada, "beta")
+    assets_globais = tmp_path / "assets_globais"
+
+    resultados = batch_convert(
+        origem=entrada,
+        destino=tmp_path / "saida",
+        workers=2,
+        modo_imagem=ModoImagem.extrair,
+        assets_dir=assets_globais,
+    )
+
+    assert all(r.status == StatusArquivo.CONCLUIDO for r in resultados)
+    assert (assets_globais / "alfa__img_p001_0.png").exists()
+    assert (assets_globais / "beta__img_p001_0.png").exists()
+    md_alfa = (tmp_path / "saida" / "alfa.md").read_text(encoding="utf-8")
+    assert "alfa__img_p001_0.png" in md_alfa
+
+
+def test_batch_imagens_fora_do_pdf_docx_emite_aviso(tmp_path):
+    """--imagens em PPTX → aviso, não erro (semântica PDF/DOCX-only)."""
+    from pptx import Presentation
+
+    entrada = tmp_path / "entrada"
+    entrada.mkdir()
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[5])
+    slide.shapes.title.text = "Slide de teste"
+    prs.save(str(entrada / "apresentacao.pptx"))
+
+    resultados = batch_convert(
+        origem=entrada,
+        destino=tmp_path / "saida",
+        workers=1,
+        modo_imagem=ModoImagem.extrair,
+    )
+
+    assert len(resultados) == 1
+    assert resultados[0].status == StatusArquivo.CONCLUIDO
+    assert any("só se aplica a PDF e DOCX" in aviso for aviso in resultados[0].avisos)
+
+
+def test_batch_imagens_obsidian_attachments(tmp_path):
+    """--obsidian + --imagens: assets em vault/attachments com wikilink."""
+    entrada = tmp_path / "entrada"
+    entrada.mkdir()
+    _pdf_com_imagem_e_texto(entrada, "nota")
+    vault = tmp_path / "vault"
+    vault.mkdir()
+
+    resultados = batch_convert(
+        origem=entrada,
+        destino=tmp_path / "saida_ignorada",
+        vault=vault,
+        workers=1,
+        modo_imagem=ModoImagem.extrair,
+    )
+
+    assert resultados[0].status == StatusArquivo.CONCLUIDO
+    attachments = vault / "attachments"
+    assert (attachments / "nota__img_p001_0.png").exists()
+    md = (vault / "nota.md").read_text(encoding="utf-8")
+    assert "![[nota__img_p001_0.png]]" in md
+
+
+def test_batch_docx_imagens_extrair(tmp_path):
+    """DOCX + --imagens extrair: assets por arquivo, sem aviso de formato."""
+    import tempfile
+
+    from docx import Document
+    from PIL import Image
+
+    entrada = tmp_path / "entrada"
+    entrada.mkdir()
+    docx = Document()
+    docx.add_paragraph("Relatorio com figura.")
+    p = docx.add_paragraph()
+    run = p.add_run()
+    img = Image.new("RGB", (30, 30), color=(30, 120, 200))
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+        img.save(tmp.name)
+        run.add_picture(tmp.name)
+    docx.save(str(entrada / "relatorio.docx"))
+
+    resultados = batch_convert(
+        origem=entrada,
+        destino=tmp_path / "saida",
+        workers=1,
+        modo_imagem=ModoImagem.extrair,
+    )
+
+    assert resultados[0].status == StatusArquivo.CONCLUIDO
+    assert not any("só se aplica a PDF e DOCX" in aviso for aviso in resultados[0].avisos)
+    assets = tmp_path / "saida" / "relatorio_assets"
+    assert (assets / "img_0001.png").exists()
+    md = (tmp_path / "saida" / "relatorio.md").read_text(encoding="utf-8")
+    assert "relatorio_assets/img_0001.png" in md
+    assert "base64" not in md
+
+
+def test_batch_docx_obsidian_wikilink(tmp_path):
+    """DOCX + --obsidian: wikilink e assets em vault/attachments."""
+    import tempfile
+
+    from docx import Document
+    from PIL import Image
+
+    entrada = tmp_path / "entrada"
+    entrada.mkdir()
+    docx = Document()
+    docx.add_paragraph("Nota com figura.")
+    p = docx.add_paragraph()
+    run = p.add_run()
+    img = Image.new("RGB", (30, 30), color=(90, 200, 40))
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+        img.save(tmp.name)
+        run.add_picture(tmp.name)
+    docx.save(str(entrada / "nota.docx"))
+    vault = tmp_path / "vault"
+    vault.mkdir()
+
+    resultados = batch_convert(
+        origem=entrada,
+        destino=tmp_path / "ignorado",
+        vault=vault,
+        workers=1,
+        modo_imagem=ModoImagem.extrair,
+    )
+
+    assert resultados[0].status == StatusArquivo.CONCLUIDO
+    assert (vault / "attachments" / "nota__img_0001.png").exists()
+    md = (vault / "nota.md").read_text(encoding="utf-8")
+    assert "![[nota__img_0001.png]]" in md
+
+
+def test_batch_imagens_stem_colidido_nao_sobrescreve(tmp_path):
+    """Mesmo stem com extensões diferentes + --assets-dir: prefixos distintos.
+
+    Review Spec-3: o prefixo agora deriva do stem do .md destino (já único
+    via _nome_destino_unico), não do stem da origem — antes, `rel.pdf` +
+    `rel.docx` geravam prefixos idênticos e sobrescreviam assets.
+    """
+    import tempfile
+
+    from docx import Document
+    from PIL import Image
+
+    entrada = tmp_path / "entrada"
+    entrada.mkdir()
+
+    # PDF "rel" com imagem
+    _pdf_com_imagem_e_texto(entrada, "rel")
+    # DOCX "rel" com imagem
+    docx = Document()
+    docx.add_paragraph("Relatorio docx.")
+    p = docx.add_paragraph()
+    run = p.add_run()
+    img = Image.new("RGB", (30, 30), color=(150, 40, 40))
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+        img.save(tmp.name)
+        run.add_picture(tmp.name)
+    docx.save(str(entrada / "rel.docx"))
+
+    assets_globais = tmp_path / "assets_globais"
+    resultados = batch_convert(
+        origem=entrada,
+        destino=tmp_path / "saida",
+        workers=2,
+        modo_imagem=ModoImagem.extrair,
+        assets_dir=assets_globais,
+    )
+
+    assert all(r.status == StatusArquivo.CONCLUIDO for r in resultados)
+    arquivos = sorted(f.name for f in assets_globais.iterdir())
+    assert len(arquivos) == 2  # nenhum asset foi sobrescrito
+    # Ordenação: rel.docx → rel.md (prefixo rel__), rel.pdf → rel-pdf.md
+    assert arquivos == ["rel-pdf__img_p001_0.png", "rel__img_0001.png"]

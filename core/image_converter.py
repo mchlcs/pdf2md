@@ -132,3 +132,50 @@ def image_to_md(path: Path) -> str:
                 return texto_llm
 
     return texto
+
+
+def ocr_bytes(dados: bytes, extensao: str) -> str:
+    """
+    OCR de bytes de imagem via imagem temporária (modo `ambos` do --imagens).
+
+    Alt-text para os links de imagem extraída de PDF/DOCX: reusa o mesmo
+    pipeline de image_to_md em arquivo temporário, apagado no finally.
+
+    Formatos fora de EXTENSOES_IMAGEM (ex.: GIF/PPM extraídos de PDF) são
+    normalizados para PNG via Pillow. Qualquer falha retorna "" — o
+    alt-text degrada para "imagem", nunca derruba a conversão.
+    """
+    import tempfile
+
+    try:
+        if extensao.lower() not in EXTENSOES_IMAGEM:
+            dados = _normalizar_png(dados)
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+            tmp_path = Path(tmp.name)
+            tmp_path.write_bytes(dados)
+
+        try:
+            return image_to_md(tmp_path).strip()
+        finally:
+            tmp_path.unlink(missing_ok=True)
+    except Exception:
+        return ""
+
+
+def _normalizar_png(dados: bytes) -> bytes:
+    """Reconverte bytes de imagem para PNG via Pillow (formato não suportado)."""
+    import io
+
+    with Image.open(io.BytesIO(dados)) as img:
+        saida = io.BytesIO()
+        img.save(saida, format="PNG")
+        return saida.getvalue()
+
+
+def alt_text_enxuto(ocr: str, max_chars: int = 120) -> str:
+    """Alt-text enxuto: primeira linha não vazia, truncada."""
+    for linha in ocr.splitlines():
+        if linha.strip():
+            limpa = linha.strip()
+            return limpa[:max_chars] + ("…" if len(limpa) > max_chars else "")
+    return "imagem"
