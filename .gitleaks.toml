@@ -1,0 +1,21 @@
+# gitleaks — configuração do pdf2md
+# Base: regras padrão do gitleaks + allowlist dos SEGREDOS INTENCIONAIS.
+# Os padrões abaixo existem só como fixtures de teste (asserções de
+# CWE-209/532/522 em tests/test_llm_enhancer.py) — não são credenciais reais.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Strings de segredo intencionais em testes (CWE-209/522/522)"
+
+paths = [
+  "tests/test_llm_enhancer.py",
+  ".secrets.baseline",   # contém hashes/encoded dos segredos auditados pelo detect-secrets
+]
+
+regexes = [
+  "sk-segredo-supersecreto-12345",
+  "sk-segredo-123",
+  "sk-supersecreta-42",
+]
