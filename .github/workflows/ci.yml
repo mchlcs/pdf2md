@@ -18,23 +18,80 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Instalar uv
+        uses: astral-sh/setup-uv@v5
+
       - name: Instalar Tesseract (OCR) — .doc legado usa textutil nativo do macOS
         run: brew install tesseract tesseract-lang
 
-      - name: Instalar dependências Python
-        run: |
-          pip install --upgrade pip
-          pip install ".[dev]"
+      - name: Sincronizar dependências (uv lock commitado)
+        run: uv sync --extra dev --frozen
 
       - name: Lint (ruff)
-        run: ruff check core/ tests/
+        run: uv run ruff check core/ tests/
 
       - name: Testes
-        run: pytest tests/ -v --cov=core --cov-report=term-missing
+        run: uv run pytest tests/ -v --cov=core --cov-report=term-missing
 
       - name: Auditoria de dependências (pip-audit)
-        run: pip-audit
+        run: uv run pip-audit
 
       - name: Scan de segredos (detect-secrets)
         run: |
-          detect-secrets scan --baseline .secrets.baseline
+          uv run detect-secrets scan --baseline .secrets.baseline
+
+      - name: Scan de credenciais (gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Smoke do empacotamento: valida que o PyInstaller gera o binário e que a
+  # forma canônica de CLI (args EXATOS da GUI, sem subcomando) converte.
+  build:
+    runs-on: macos-latest
+    needs: test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Sincronizar dependências
+        run: uv sync --extra dev --frozen
+
+      - name: Gerar PDF de teste
+        run: |
+          uv run python - <<'EOF'
+          import fitz
+          doc = fitz.open()
+          p = doc.new_page(width=595, height=842)
+          p.insert_text((50, 50), "PDF de smoke test do empacotamento CI.")
+          doc.save("smoke.pdf")
+          doc.close()
+          EOF
+
+      - name: Empacotar (PyInstaller one-file)
+        run: |
+          PYMUPDF_RES="$(uv run python -c "import pymupdf, os; print(os.path.join(os.path.dirname(pymupdf.__file__), 'layout', 'resources'))")"
+          uv run pyinstaller core/cli.py \
+            --onefile --name pdf2md \
+            --add-data "${PYMUPDF_RES}:pymupdf/layout/resources" \
+            --collect-submodules pymupdf4llm \
+            --collect-submodules mammoth \
+            --hidden-import pillow_heif \
+            --distpath dist --workpath build/pyinstaller --specpath build \
+            --noconfirm --clean
+
+      - name: Smoke — args EXATOS da GUI (sem subcomando)
+        run: |
+          ./dist/pdf2md smoke.pdf saida --json | grep -q '"status": "concluido"'
+
+      - name: Smoke — subcomando llm
+        run: |
+          ./dist/pdf2md llm testar --json | grep -q '"ok"'

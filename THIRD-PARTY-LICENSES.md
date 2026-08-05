@@ -22,9 +22,10 @@ satisfaz a atribuição exigida por essas licenças.
 | PyMuPDF | 1.27.2.3 | **AGPL-3.0** ou Artifex Commercial | https://github.com/pymupdf/PyMuPDF |
 | pymupdf4llm | 1.27.2.3 | **AGPL-3.0** ou Artifex Commercial | https://github.com/pymupdf/RAG |
 | mammoth | 1.12.0 | BSD-2-Clause | https://github.com/mwilliamson/python-mammoth |
-| python-docx | 1.2.0 | MIT | https://github.com/python-openxml/python-docx |
+| python-pptx | 1.0.2 | MIT | https://github.com/scanny/python-pptx |
+| openpyxl | 3.1.5 | MIT | https://foss.heptapod.net/openpyxl/openpyxl |
 | pytesseract | 0.3.13 | Apache-2.0 | https://github.com/madmaze/pytesseract |
-| Pillow | 12.2.0 | HPND (MIT-CMU) | https://github.com/python-pillow/Pillow |
+| Pillow | 12.3.0 | HPND (MIT-CMU) | https://github.com/python-pillow/Pillow |
 | pillow-heif | 1.3.0 | BSD-3-Clause | https://github.com/bigcat88/pillow_heif |
 | typer | 0.26.3 | MIT | https://github.com/fastapi/typer |
 | rich | 15.0.0 | MIT | https://github.com/Textualize/rich |
@@ -39,7 +40,7 @@ licenças **não** se propagam ao código do pdf2md.
 | Executável | Licença | Uso |
 |---|---|---|
 | Tesseract OCR | Apache-2.0 | OCR de imagens e PDFs escaneados |
-| antiword | GPL-2.0 | Conversão de `.doc` (Word binário OLE) |
+| textutil | Apple (sistema macOS) | Conversão de `.doc` (Word binário OLE) |
 
 ---
 

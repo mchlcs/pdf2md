@@ -25,8 +25,21 @@ Resposta esperada: 48h. Fix + release: 7 dias para vulnerabilidades críticas.
 
 Este projeto processa arquivos PDF locais. Superfície de ataque:
 - **Path traversal** — input de paths validado antes de qualquer IO
-- **Subprocess injection** — nenhum input de usuário passado diretamente ao shell
-- **Dependências** — `pip audit` roda no CI a cada push
+  (`validar_path_seguro` + nomes de asset sempre gerados, ADR-0005)
+- **Subprocess injection** — nenhum input de usuário passado diretamente
+  ao shell; `.doc` via `textutil` (path fixo, lista de args, timeout)
+- **SSRF** — URL do LLM com allowlist http/https e sem userinfo (ADR-0004)
+- **Segredos** — API key do LLM só via environment/Keychain, nunca em argv
+  (CWE-522, ADR-0007); `detect-secrets` + `gitleaks` no CI
+- **Dependências** — `pip-audit` roda no CI a cada push
+
+## Riscos aceitos (threat model documentado)
+
+| Risco | Justificativa | Ref. |
+|---|---|---|
+| **App não-sandboxed** (sem entitlements) | Distribuição ad-hoc sem Developer ID; sandbox exigiria `com.apple.security.network.client` e re-assinatura estável | ADR-0007 |
+| **Keychain sem access group** | App não-sandboxed: qualquer processo do mesmo usuário que conheça service/account lê o item — aceito para app desktop pessoal ad-hoc | ADR-0007 |
+| **SSRF sem blocklist de IP privado/metadata** | A URL do LLM vem do próprio usuário (Settings/env), não de documento — `localhost` é o caso de uso principal (Ollama) | ADR-0004/0007 |
 
 ## Fora do escopo
 
