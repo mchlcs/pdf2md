@@ -3,6 +3,59 @@
 Based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **Assets com espaço/acento no nome quebravam `--obsidian`/`--assets-dir`**
+  (ALTA): o prefixo `{stem}__` com "Relatório.pdf" violava o regex de nome
+  seguro → ValueError → arquivo inteiro virava ERRO. Prefixo agora passa por
+  slugify ASCII (NFKD). Revisão fullstack 2026-08-13 (#29).
+- **DOCX com imagem gigante derrubava o processo** (ALTA): `f.read()` lia a
+  imagem inteira antes do check de 50 MB — docx malicioso de 2 GB causava OOM.
+  Tamanho agora é checado via seek/tell antes da leitura (#29).
+- **GUI: erros do subprocesso invisíveis** — stderr era descartado e exit code
+  nunca verificado; todo erro virava "Falha ao executar processo". ProcessRunner
+  agora propaga (stdout, stderr, exitCode) e a GUI exibe o erro real (#29).
+- **Default-command com flags antes do positional** (`pdf2md --sobrescrever
+  in.pdf out/`) falhava com "No such option" — flags são reordenadas (#29).
+- **Markup Rich vazava no JSON `erro`** (`[red]...[/red]` renderizado cru na GUI)
+  — mensagem limpa no caminho `--json` (#29).
+- **XLSX com linhas vazias no topo descartava o conteúdo** — primeira linha
+  não-vazia vira header; streaming read_only preservado (2 passadas) (#29).
+- **TesseractError mascarado como "arquivo corrompido"** — mensagem real de OCR
+  (idioma ausente) agora é exibida (#29).
+
+### Security
+
+- **CI: gate detect-secrets era vácuo** — `scan --baseline` auto-atualiza o
+  baseline e sai 0 com segredo novo; `--fail-on-unknown` não existe no 1.5.0.
+  Gate real: `detect-secrets-hook` + grep `ERROR: Potential secrets` (#29).
+- **CI: smoke `llm testar` validava valor, não contrato** — sem servidor no CI,
+  `ok: false` é legítimo; gate agora valida o shape JSON (`"ok": true|false`).
+- **CI: `permissions: contents: read`** (least privilege) + actions pinadas por
+  SHA (checkout v4.4.0, setup-python v5.6.0, setup-uv v5.4.2, cache v4.3.0).
+- **mypy strict agora roda no CI** — config existia mas estava morta; 21 erros
+  resolvidos (anotações + ignore_missing_imports para libs sem stubs).
+- **Prompt injection documentado** em SECURITY.md (texto do documento vai ao
+  LLM sem isolamento — risco aceito, ADR-0004).
+
+### Changed
+
+- **Desempenho do pipeline de qualidade**: `corrigir_mojibake` (~40 travessias
+  O(n) de count+replace) e `limpar_artefatos` (6× replace) agora rodam em
+  1 passada (regex sub + str.translate compilada) (#30).
+- **Tabela do CLI determinística**: resultados em batch seguem a ordem de
+  entrada (antes: ordem de conclusão do ThreadPool, variava entre runs) (#30).
+- **`_linha_tabela_md` extraído** (DRY pptx/xlsx) (#30).
+
+### Testes
+
+- 206 → **273 testes**; cobertura 87% → **94%** (cli.py 68→88%, image_converter
+  75→95%, pdf_images 79→100%) (#29, #30).
+- **Teste-fantasma corrigido**: `testar` importado de llm_enhancer fazia
+  chamada de rede real a localhost:11434 na suíte — renomeado para `_testar_llm`.
+
 ## [0.6.0] — 2026-08-05
 
 ### Fixed

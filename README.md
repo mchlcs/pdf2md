@@ -152,7 +152,7 @@ Precedence: `--llm-url` / `--llm-modelo` flags > env vars > defaults. The API ke
 Every conversion runs through an automatic pipeline:
 
 1. **Mojibake correction** — fixes corrupted accents (`Ã£`→`ã`, `Ã§`→`ç` etc.)
-2. **Artifact cleanup** — removes soft hyphens (U+00AD), zero-width chars, mid-string BOM
+2. **Artifact cleanup** — removes soft hyphens (U+00AD), zero-width chars, BOM
 3. **Validation** — detects residual issues and shows ⚠ warnings in CLI and GUI
 
 Files with quality issues show an amber icon (✓ orange) in the GUI and `done⚠` status in the CLI.
