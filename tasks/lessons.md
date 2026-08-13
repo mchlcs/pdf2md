@@ -9,6 +9,8 @@
 - `[2026-05-29] PATTERN` **DMG com binário >80MB**: imagem RW de tamanho explícito + detach por device node `-force`. `create -srcfolder` com symlink `/Applications` estoura. Ver `docs/Standards-Anti-Patterns.md §2`.
 - `[2026-05-29] PATTERN` **PyInstaller + concorrência**: `ThreadPoolExecutor`, nunca `ProcessPoolExecutor`. `spawn` re-executa o binário congelado com flags que Typer rejeita.
 - `[2026-05-29] CONSTRAINT` **Build de release** vive em script versionado (`scripts/build_app.sh`), nunca comandos one-off.
+- `[2026-08-13] FAILURE` **`detect-secrets scan --baseline` é gate VÁCUO**: auto-atualiza o baseline e sai 0 mesmo com segredo novo. `--fail-on-unknown` NÃO existe no 1.5.0 (CI quebrou com `unrecognized arguments`). `detect-secrets-hook` retorna 1 sempre (reescreve line_number/generated_at). Gate real: hook + grep `"ERROR: Potential secrets"` no output → exit 1.
+- `[2026-08-13] FAILURE` **Smoke de contrato ≠ smoke de valor**: `grep '"ok"'` casa com `"ok": false` (vácuo); `grep '"ok": true'` falha sempre quando o ambiente não tem o serviço (CI sem Ollama). Gate de contrato JSON: `grep -qE '"ok": (true|false)'` — valida shape, não resultado.
 
 ## Backend & Core (Stratum)
 
