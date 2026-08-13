@@ -12,7 +12,7 @@ import csv
 from pathlib import Path
 from typing import Any
 
-from core.utils import _sanitizar_celula_md, _validar_existencia
+from core.utils import _linha_tabela_md, _sanitizar_celula_md, _validar_existencia
 
 # Encodings tentados em cascade para CSV — latin-1 nunca falha (mapeia 256 bytes).
 _CSV_ENCODINGS = ("utf-8-sig", "utf-8", "cp1252", "latin-1")
@@ -77,8 +77,8 @@ def _xlsx_para_md(path: Path) -> str:
             headers = [_celula_str(c) for c in header]
 
             linhas: list[str] = []
-            linhas.append("| " + " | ".join(headers) + " |")
-            linhas.append("| " + " | ".join(["---"] * len(headers)) + " |")
+            linhas.append(_linha_tabela_md(headers))
+            linhas.append(_linha_tabela_md(["---"] * len(headers)))
 
             # 2ª passada: corpo — pula a primeira linha não-vazia (o header
             # já usado acima) e linhas totalmente vazias.
@@ -90,7 +90,7 @@ def _xlsx_para_md(path: Path) -> str:
                 if not header_visto:
                     header_visto = True
                     continue
-                linhas.append("| " + " | ".join(celulas) + " |")
+                linhas.append(_linha_tabela_md(celulas))
 
             partes.append(f"## {sheet_name}\n\n" + "\n".join(linhas))
     finally:

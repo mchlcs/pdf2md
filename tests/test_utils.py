@@ -4,7 +4,24 @@ Testes para core/utils.py — foco na função sanitizar_mensagem_erro
 """
 from pathlib import Path
 
-from core.utils import sanitizar_mensagem_erro
+from core.utils import _linha_tabela_md, sanitizar_mensagem_erro
+
+
+def test_linha_tabela_md_monta_linha_com_pipes():
+    assert _linha_tabela_md(["a", "b"]) == "| a | b |"
+
+
+def test_linha_tabela_md_separador_de_header():
+    assert _linha_tabela_md(["---"] * 3) == "| --- | --- | --- |"
+
+
+def test_linha_tabela_md_celula_vazia():
+    assert _linha_tabela_md(["", "x"]) == "|  | x |"
+
+
+def test_linha_tabela_md_celula_ja_sanitizada_nao_reescapa():
+    # _linha_tabela_md não sanitiza — quem sanitiza é _sanitizar_celula_md.
+    assert _linha_tabela_md(["a|b"]) == "| a|b |"
 
 
 def test_sanitiza_path_simples():
