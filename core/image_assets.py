@@ -12,6 +12,7 @@ Compartilhada por `core/pdf_images.py` (PDF) e `core/doc_converter.py`
 """
 import hashlib
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -23,6 +24,26 @@ from core.utils import (
 
 # Nome de asset: só ASCII seguro — gerado, nunca derivado de metadado.
 _RE_NOME_SEGURO = re.compile(r"^[A-Za-z0-9._-]+$")
+
+
+def slugificar_ascii(texto: str) -> str:
+    """
+    Normaliza texto para ASCII seguro (prefixos de nome de asset).
+
+    FIX 1: o prefixo derivado do stem do arquivo (ex: "Relatório Final__",
+    com espaço/acento) violava `_RE_NOME_SEGURO` em --obsidian/--assets-dir
+    → ValueError em `caminho_seguro` → o arquivo inteiro virava ERRO.
+    NFKD separa os acentos (é → e + combining mark, descartado no encode
+    ascii) e qualquer caractere fora de [A-Za-z0-9._-] vira '_' — hífen e
+    ponto são preservados (são válidos no regex de nome seguro).
+    """
+    sem_acentos = (
+        unicodedata.normalize("NFKD", texto)
+        .encode("ascii", "ignore")
+        .decode("ascii")
+    )
+    return re.sub(r"[^A-Za-z0-9._-]", "_", sem_acentos)
+
 
 # Extensões aceitas na escrita direta; fora disso o conversor normaliza
 # (PDF → PNG via Pixmap; DOCX → PNG via Pillow) ou descarta com aviso.
@@ -77,6 +98,7 @@ class ContextoAssets:
     md_dir: Path          # diretório do .md — base do link relativo
     wikilinks: bool       # modo Obsidian: ![[nome]] em vez de ![](relativo)
     avisos: list[str]     # avisos de extração (limites, falhas)
+    aviso_limite_renders: bool = False  # guard anti-duplicação de aviso (FIX 4)
 
 
 def gerar_nome(prefixo: str, base: str, extensao: str) -> str:

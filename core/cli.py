@@ -10,8 +10,10 @@ Uso: pdf2md INPUT OUTPUT [opções]
 """
 import json
 import os
+import re
 import sys
 import time
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -44,6 +46,54 @@ app = typer.Typer(
 # (default-command: pdf2md <arquivo> <destino> dispensa o subcomando converter).
 _COMANDOS_TOPO = frozenset({"converter", "llm", "--help", "-h", "--version", "--completion"})
 
+# Opções do comando `converter` que consomem o próximo argumento como valor
+# (FIX 5 — reordenação do default-command precisa pulá-las ao achar o
+# primeiro positional; --imagens=extrair e afins não precisam, o valor vem
+# junto na mesma flag).
+_OPCOES_COM_VALOR = frozenset({
+    "--workers", "-w",
+    "--vault",
+    "--ignorar-margens",
+    "--llm-url",
+    "--llm-modelo",
+    "--imagens",
+    "--assets-dir",
+})
+
+# Markup Rich usado nas mensagens de erro do console ([red]...[/red]) — o
+# caminho --json emite o campo `erro` no stdout consumido pelo bridge Swift,
+# que não entende tags Rich (FIX 9).
+_RE_MARKUP_RICH = re.compile(r"\[/?[a-zA-Z][a-zA-Z0-9._ -]*?\]")
+
+
+def _indice_primeiro_posicional(argv: list[str]) -> int | None:
+    """Índice do 1º argumento não-flag (pulando valores de opções).
+
+    `pdf2md --workers 8 in.pdf out/` → pula "--workers" E "8" (valor da
+    opção) até achar "in.pdf". Usado pelo default-command (FIX 5).
+    """
+    i = 1
+    while i < len(argv):
+        arg = argv[i]
+        if arg.startswith("-"):
+            if arg in _OPCOES_COM_VALOR:
+                i += 2  # flag + valor
+            else:
+                i += 1
+            continue
+        return i
+    return None
+
+
+def _sem_markup(texto: str) -> str:
+    """Remove markup Rich ([red]...[/red]) de mensagens (FIX 9).
+
+    Aplicado apenas a mensagens geradas pelo próprio CLI (hardcoded), que
+    são as únicas que podem conter tags Rich — nunca em mensagens de erro
+    sanitizadas (que podem conter "[user]" legítimo).
+    """
+    return _RE_MARKUP_RICH.sub("", texto)
+
 
 def main() -> None:
     """
@@ -54,9 +104,22 @@ def main() -> None:
     canônica (README + GUI BatchProcessor). O click vendored do Typer 0.26
     não suporta args de grupo + subcomandos na mesma árvore, então o
     default-command é resolvido aqui, antes do parser.
+
+    FIX 5: flags antes do positional (`pdf2md --sobrescrever in.pdf out/`)
+    quebravam com 'No such option' — as flags são REORDENADAS para depois
+    do `converter` injetado.
     """
-    if len(sys.argv) > 1 and sys.argv[1] not in _COMANDOS_TOPO and not sys.argv[1].startswith("-"):
-        sys.argv.insert(1, "converter")
+    if len(sys.argv) > 1 and sys.argv[1] not in _COMANDOS_TOPO:
+        if sys.argv[1].startswith("-"):
+            pos = _indice_primeiro_posicional(sys.argv)
+            if pos is not None and sys.argv[pos] not in _COMANDOS_TOPO:
+                # `pdf2md --sobrescrever in.pdf out/` → `converter --sobrescrever in.pdf out/`
+                flags = sys.argv[1:pos]
+                del sys.argv[1:pos]
+                sys.argv.insert(1, "converter")
+                sys.argv[2:2] = flags
+        else:
+            sys.argv.insert(1, "converter")
     app()
 console = Console(stderr=True)
 
@@ -91,7 +154,7 @@ def _fmt_duracao(seg: float) -> str:
 
 
 @contextmanager
-def _silenciar_stdout_nativo():
+def _silenciar_stdout_nativo() -> Iterator[None]:
     """
     Redireciona o fd 1 (stdout) para o fd 2 (stderr) no nível do OS.
 
@@ -198,7 +261,9 @@ def converter(
         )
         console.print(msg)
         if json_output:
-            _emitir_json(str(origem), StatusArquivo.ERRO.value, msg)
+            # FIX 9: o campo `erro` do JSON não pode carregar markup Rich
+            # ([red]...[/red]) — o bridge Swift exibe a string crua.
+            _emitir_json(str(origem), StatusArquivo.ERRO.value, _sem_markup(msg))
         raise typer.Exit(code=1)
 
     # Vault implica obsidian

@@ -10,6 +10,7 @@ obsoleto desde Excel 2007. Usuários devem converter para .xlsx primeiro.
 """
 import csv
 from pathlib import Path
+from typing import Any
 
 from core.utils import _sanitizar_celula_md, _validar_existencia
 
@@ -63,30 +64,52 @@ def _xlsx_para_md(path: Path) -> str:
     try:
         for sheet_name in wb.sheetnames:
             ws = wb[sheet_name]
-            rows = list(ws.iter_rows(values_only=True))
 
-            if not rows:
-                continue
-
-            headers = [_celula_str(c) for c in rows[0]]
-            if not any(headers):
-                partes.append(f"## {sheet_name}")
-                continue
+            # FIX 6: duas passadas em vez de list(iter_rows(values_only=True))
+            # — read_only=True é streaming; materializar 1M linhas em memória
+            # derrotava o propósito. A 1ª passada acha a primeira linha
+            # NÃO-VAZIA como header — antes, sheet com linhas vazias no topo
+            # tinha "headers" todos vazios e o conteúdo era descartado
+            # silenciosamente (só o heading `## nome` era emitido).
+            header = _primeira_linha_nao_vazia(ws)
+            if header is None:
+                continue  # sheet sem nenhuma célula com conteúdo
+            headers = [_celula_str(c) for c in header]
 
             linhas: list[str] = []
             linhas.append("| " + " | ".join(headers) + " |")
             linhas.append("| " + " | ".join(["---"] * len(headers)) + " |")
 
-            for row in rows[1:]:
+            # 2ª passada: corpo — pula a primeira linha não-vazia (o header
+            # já usado acima) e linhas totalmente vazias.
+            header_visto = False
+            for row in ws.iter_rows(values_only=True):
                 celulas = [_celula_str(c) for c in row]
-                if any(celulas):
-                    linhas.append("| " + " | ".join(celulas) + " |")
+                if not any(celulas):
+                    continue
+                if not header_visto:
+                    header_visto = True
+                    continue
+                linhas.append("| " + " | ".join(celulas) + " |")
 
             partes.append(f"## {sheet_name}\n\n" + "\n".join(linhas))
     finally:
         wb.close()
 
     return "\n\n".join(partes)
+
+
+def _primeira_linha_nao_vazia(ws: Any) -> tuple[Any, ...] | None:
+    """Primeira linha com ao menos uma célula com conteúdo (header real).
+
+    FIX 6: em vez de assumir que a linha 0 é o header, varre até achar a
+    primeira linha utilizável — planilhas com linhas em branco no topo
+    (comuns em exportações) não perdem mais o cabeçalho nem o corpo.
+    """
+    for row in ws.iter_rows(values_only=True):
+        if any(_celula_str(c) for c in row):
+            return tuple(row)  # tuple(Any) → tuple[Any, ...] (mypy no-any-return)
+    return None
 
 
 def _csv_para_md(path: Path) -> str:
@@ -117,7 +140,7 @@ def _csv_para_md(path: Path) -> str:
     return "\n".join(linhas)
 
 
-def _celula_str(valor) -> str:
+def _celula_str(valor: Any) -> str:
     """Normaliza valor de célula para string Markdown segura."""
     if valor is None:
         return ""

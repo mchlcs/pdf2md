@@ -36,8 +36,10 @@ import urllib.request
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import TypedDict
+from typing import Any, TypedDict
 from urllib.parse import urlsplit
+
+from core.utils import _MAX_BYTES_IMAGEM
 
 # ── Configuração ──────────────────────────────────────────────────────────────
 
@@ -163,7 +165,7 @@ def _cabecalhos_auth(config: ConfigLLM | None) -> dict[str, str]:
     return {**_HEADERS_BASE, "Authorization": f"Bearer {_key(config)}"}
 
 
-def _completar(mensagens: list[dict], config: ConfigLLM | None = None) -> str:
+def _completar(mensagens: list[dict[str, Any]], config: ConfigLLM | None = None) -> str:
     """
     Chama /chat/completions via urllib.request (sem deps extras).
     Compatível com qualquer API no formato OpenAI.
@@ -208,7 +210,7 @@ def _erro_seguro(exc: Exception) -> str:
     return type(exc).__name__
 
 
-def _get_models(config: ConfigLLM | None, timeout: int) -> dict | None:
+def _get_models(config: ConfigLLM | None, timeout: int) -> dict[str, Any] | None:
     """
     GET {url}/models com auth — shape único compartilhado por
     disponivel()/testar()/listar_modelos() (sem triplicação de Request).
@@ -406,6 +408,15 @@ def ocr_com_visao(
         return "", [f"Imagem não encontrada: {imagem_path.name}"]
 
     try:
+        # FIX 8: verifica o tamanho ANTES de ler/base64 — um render 300 dpi
+        # chega a ~35 MB e uma imagem gigante estouraria memória (read_bytes)
+        # e a janela de contexto do LLM. Acima do limite: falha graciosa com
+        # aviso (mesmo _MAX_BYTES_IMAGEM dos assets, 50 MB).
+        if imagem_path.stat().st_size > _MAX_BYTES_IMAGEM:
+            return "", [
+                f"imagem {imagem_path.name} excede "
+                f"{_MAX_BYTES_IMAGEM // (1024 * 1024)} MB — OCR com visão ignorado"
+            ]
         img_b64 = base64.standard_b64encode(imagem_path.read_bytes()).decode("ascii")
 
         mensagem_visao = {

@@ -3,6 +3,7 @@ Converte arquivos .pptx em Markdown.
 Estratégia: python-pptx → extrai título + corpo + tabelas por slide.
 """
 from pathlib import Path
+from typing import Any
 
 from core.utils import _sanitizar_celula_md, _validar_existencia
 
@@ -52,7 +53,7 @@ def pptx_to_md(path: Path) -> str:
     return "\n\n".join(partes)
 
 
-def _processar_shape(shape, partes: list[str]) -> None:
+def _processar_shape(shape: Any, partes: list[str]) -> None:
     """Extrai conteúdo de um shape (tabela, título ou corpo) para a lista de partes."""
     if shape.has_table:
         md_tabela = _tabela_para_md(shape.table)
@@ -82,7 +83,7 @@ def _processar_shape(shape, partes: list[str]) -> None:
                 partes.append(linha)
 
 
-def _tabela_para_md(table) -> str:
+def _tabela_para_md(table: Any) -> str:
     """Converte python-pptx Table em tabela Markdown."""
     if not table.rows:
         return ""
