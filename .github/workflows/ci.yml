@@ -135,6 +135,9 @@ jobs:
           ./dist/pdf2md smoke.pdf saida --json | grep -q '"status": "concluido"'
 
       - name: Smoke — subcomando llm
-        # FIX 1: '"ok"' casava com '"ok": false' (CLI falha com exit 0) — gate vácuo.
+        # Contrato JSON, não valor: no CI não há servidor LLM, então `ok`
+        # é `false` legítimo (CLI falha com exit 0). O gate valida que o
+        # binário emite o contrato (campo ok com bool) — um binário quebrado
+        # (traceback, markup, JSON inválido) falha aqui.
         run: |
-          ./dist/pdf2md llm testar --json | grep -q '"ok": true'
+          ./dist/pdf2md llm testar --json | grep -qE '"ok": (true|false)'
