@@ -144,6 +144,9 @@ Precedence: `--llm-url` / `--llm-modelo` flags > env vars > defaults. The API ke
 | Provider | PDF2MD_LLM_URL | PDF2MD_LLM_MODEL |
 |----------|----------------|------------------|
 | Ollama (local, free) | `http://localhost:11434/v1` | `llama3.2-vision` |
+| Ollama Cloud | `https://ollama.com/v1` | `gpt-oss:120b` |
+| OpenCode Zen (open models) | `https://opencode.ai/zen/v1` | `deepseek-v4-flash` |
+| OpenCode Go | `https://opencode.ai/zen/go/v1` | `grok-4.5` |
 | Gemini Flash (free tier) | `https://generativelanguage.googleapis.com/v1beta/openai/` | `gemini-2.0-flash` |
 | Groq (fast, free) | `https://api.groq.com/openai/v1` | `llama-3.1-8b-instant` |
 
