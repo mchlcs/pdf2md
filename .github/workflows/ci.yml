@@ -58,9 +58,15 @@ jobs:
           uv run pip-audit -r /tmp/reqs.txt
 
       - name: Scan de segredos (detect-secrets)
-        # FIX 2: sem --fail-on-unknown o scan sai 0 mesmo com segredo novo fora do baseline.
+        # Gate real: o `scan --baseline` auto-atualiza o baseline e sai 0
+        # mesmo com segredo novo (vácuo). O `detect-secrets-hook` retorna 1
+        # SEMPRE (também reescreve line_number/generated_at a cada run) —
+        # o discriminativo é o output: "ERROR: Potential secrets" = segredo
+        # novo fora do baseline → falha. Só "baseline updated" = passa.
+        # uv.lock excluído como no .pre-commit-config.yaml.
         run: |
-          uv run detect-secrets scan --baseline .secrets.baseline --fail-on-unknown
+          git ls-files -z | grep -zv '^uv.lock$' | xargs -0 uv run detect-secrets-hook --baseline .secrets.baseline > /tmp/ds-out.txt 2>&1 || true
+          if grep -q "ERROR: Potential secrets" /tmp/ds-out.txt; then cat /tmp/ds-out.txt; exit 1; fi
 
       - name: Scan de credenciais (gitleaks)
         # Chamada direta (não a action): a action falhava com
