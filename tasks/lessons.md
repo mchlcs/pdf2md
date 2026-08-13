@@ -28,6 +28,7 @@
 - `[2026-05-30] PATTERN` **alertaColar (bool) → erroColagem (String?)**: binding Bool não re-dispara alert se já `true`. String? com reset no topo da função garante re-trigger em falhas consecutivas.
 - `[2026-05-30] PATTERN` **UUID para filename de paste**: `Int(Date.timeIntervalSince1970)` (granularidade de segundo) causa colisão em uso rápido. Usar `UUID().uuidString`.
 - `[2026-05-30] CONSTRAINT` **limpar() deve deletar arquivos temp**: paste salva PNGs em `~/Library/Caches/pdf2md/pastes/`. `limpar()` deve chamar `FileManager.removeItem` para cada URL neste diretório antes de `removeAll()`.
+- `[2026-08-13] FAILURE` **Nunca filtrar por igualdade de UTI hardcoded**: `UTType(filenameExtension:)` resolve `.docx` → `org.openxmlformats.wordprocessingml.document` (SEM `officedocument.`), mas a lista hardcoded usava a variante COM o segmento → `contains()` falhava e o drop/picker rejeitavam docx/pptx/xlsx silenciosamente. Comparar por EXTENSÃO case-insensitive (espelhando `core/utils.py EXTENSOES_PERMITIDAS`); `UTType` do picker derivados das extensões, não de strings UTI.
 
 ## Segurança (Sentinel)
 

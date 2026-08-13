@@ -18,7 +18,7 @@ Convert PDFs, images, Word, PPTX and spreadsheets to Markdown — batch processi
 
 ## Requirement — Tesseract OCR
 
-Required for scanned PDFs and images containing text.
+Install for scanned PDFs and images containing text:
 
 ```bash
 brew install tesseract tesseract-lang
@@ -57,7 +57,7 @@ tags:
 ---
 ```
 
-### ⚡ AI Enhance (fallback)
+### AI Enhance (fallback)
 
 Enable the **AI Enhance** toggle to use an LLM when conversion detects quality issues (broken words, corrupted encoding, very short output).
 
@@ -70,7 +70,7 @@ brew install ollama
 ollama pull llama3.2-vision
 ```
 
-The CLI equivalent uses environment variables — see CLI section below.
+CLI equivalent: environment variables (see below).
 
 ## CLI
 
