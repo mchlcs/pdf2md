@@ -36,19 +36,20 @@ struct ContentView: View {
     private static let alturaArrastarVazia: CGFloat = 280
     private static let alturaArrastarCompacta: CGFloat = 110
 
-    // Tipos permitidos no picker — calculado uma vez (fix: eficiência + UTI canônicas)
+    // Extensões suportadas — espelha core/utils.py EXTENSOES_PERMITIDAS
+    // (fonte da verdade; o core valida por path.suffix.lower()).
+    private static let extensoesPermitidas: Set<String> = [
+        "pdf", "png", "jpg", "jpeg", "tiff", "tif", "webp", "bmp", "heic",
+        "doc", "docx", "pptx", "xlsx", "csv",
+    ]
+
+    // Tipos permitidos no picker — derivados das EXTENSÕES (não de UTIs
+    // hardcoded): o LaunchServices resolve .docx/.pptx/.xlsx para UTIs SEM
+    // o segmento "officedocument." (ex: org.openxmlformats.wordprocessingml
+    // .document) — a UTI hardcoded antiga (com "officedocument.") nunca
+    // casava, e o drop/picker rejeitava docx, pptx e xlsx.
     private static let tiposPermitidos: [UTType] = {
-        var tipos: [UTType] = [.pdf, .png, .jpeg, .tiff, .bmp, .heic]
-        let utis = [
-            "org.openxmlformats.officedocument.wordprocessingml.document",       // docx
-            "com.microsoft.word.doc",                                             // doc
-            "org.openxmlformats.officedocument.presentationml.presentation",     // pptx
-            "org.openxmlformats.officedocument.spreadsheetml.sheet",             // xlsx
-            "public.comma-separated-values-text",                                 // csv
-        ]
-        tipos += utis.compactMap { UTType($0) }
-        if let webp = UTType(filenameExtension: "webp") { tipos.append(webp) }
-        return tipos
+        extensoesPermitidas.compactMap { UTType(filenameExtension: $0) }
     }()
 
     // Pasta temporária para imagens coladas — compartilhada entre colarImagem e limpar
@@ -467,10 +468,11 @@ struct ContentView: View {
     }
 
     /// FIX 5: drop aceitava qualquer UTType.fileURL (.app, .dmg… entravam na
-    /// lista e viravam "ignorado"). Filtra pelos MESMOS tipos do picker.
+    /// lista e viravam "ignorado"). Filtra por EXTENSÃO (case-insensitive) —
+    /// comparação por UTI falhava: LaunchServices resolve .docx/.pptx/.xlsx
+    /// para UTIs diferentes das hardcoded (ver tiposPermitidos acima).
     private static func tipoSuportado(_ url: URL) -> Bool {
-        guard let tipo = UTType(filenameExtension: url.pathExtension) else { return false }
-        return Self.tiposPermitidos.contains(tipo)
+        extensoesPermitidas.contains(url.pathExtension.lowercased())
     }
 
     private func selecionarCaminho() {
