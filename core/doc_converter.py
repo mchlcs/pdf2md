@@ -30,6 +30,7 @@ from core.image_assets import (
 )
 from core.image_converter import alt_text_enxuto, ocr_bytes
 from core.utils import (  # fonte única da verdade (re-exportado)
+    _MAX_BYTES_IMAGEM,
     EXTENSOES_DOC,
     ModoImagem,
     _validar_existencia,
@@ -209,6 +210,18 @@ def _montar_handler(contexto: ContextoAssets) -> Callable[[_ImagemMammoth], dict
             return {}
 
         with image.open() as f:
+            # FIX 2: checa o tamanho ANTES de ler — um docx malicioso com
+            # imagem de 2 GB materializava tudo em memória no f.read()
+            # (o check de 50 MB em registrar_asset vinha DEPOIS da leitura
+            # e derrubava o processo). seek/tell é O(1) e não lê bytes.
+            f.seek(0, 2)
+            if f.tell() > _MAX_BYTES_IMAGEM:
+                contexto.avisos.append(
+                    f"imagem {contexto.coletor.total + 1} do documento excede "
+                    f"{_MAX_BYTES_IMAGEM // (1024 * 1024)} MB — ignorada"
+                )
+                return {}
+            f.seek(0)
             dados = f.read()
 
         ext = _MIME_PARA_EXT.get(image.content_type or "")

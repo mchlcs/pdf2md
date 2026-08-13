@@ -15,7 +15,7 @@ repos:
 
   # Linting Python
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.4.4
+    rev: v0.15.15  # FIX 7: alinhado com uv.lock (ruff 0.15.15) e runtime local
     hooks:
       - id: ruff
         args: [--fix]

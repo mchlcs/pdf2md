@@ -36,7 +36,8 @@ enum LLMProbe {
         var env: [String: String] = [:]
         if let url { env["PDF2MD_LLM_URL"] = url }
         if let key { env["PDF2MD_LLM_KEY"] = key }
-        return await ProcessRunner.executar(binario: binario, args: args, env: env)
+        let resultado = await ProcessRunner.executar(binario: binario, args: args, env: env)
+        return resultado.stdout
     }
 }
 
@@ -52,6 +53,9 @@ struct SettingsView: View {
     @State private var statusOk: Bool? = nil
     @State private var chave: String = KeychainHelper.ler() ?? ""
     @State private var geracao = 0  // descarta respostas atrasadas de providers antigos
+    @FocusState private var focoChave: Bool      // FIX 4: salva key no blur, não a cada tecla
+    @State private var chaveModificada = false   // FIX 4: evita re-salvar sem edição
+    @State private var erroKeychain: String?     // FIX 4: alerta de persistência
 
     private var provider: LLMProvider { LLMProvider(rawValue: providerRaw) ?? .ollama }
     private var urlResolvida: String? {
@@ -103,14 +107,15 @@ struct SettingsView: View {
 
                 if provider.requerKey {
                     SecureField("API key", text: $chave)
-                        .onChange(of: chave) { _ in
-                            // Persiste no Keychain (D7) — nunca em UserDefaults
-                            if chave.trimmingCharacters(in: .whitespaces).isEmpty {
-                                KeychainHelper.apagar()
-                            } else {
-                                KeychainHelper.salvar(chave)
-                            }
-                            recarregar()
+                        .focused($focoChave)
+                        .onChange(of: chave) { _ in chaveModificada = true }
+                        // FIX 4: antes, cada keystroke fazia delete+add no
+                        // Keychain (D7) e ignorava o retorno Bool — falha de
+                        // persistência era silenciosa. Agora salva em commit
+                        // (Enter) ou perda de foco, com alerta em falha.
+                        .onSubmit { persistirChave() }
+                        .onChange(of: focoChave) { temFoco in
+                            if !temFoco { persistirChave() }
                         }
                 }
             }
@@ -170,6 +175,15 @@ struct SettingsView: View {
         .frame(width: 460)
         .padding(12)
         .task { recarregar() }
+        // Alerta de falha de persistência da API key (FIX 4)
+        .alert(
+            "Erro ao salvar API key",
+            isPresented: Binding(get: { erroKeychain != nil }, set: { if !$0 { erroKeychain = nil } })
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(erroKeychain ?? "")
+        }
     }
 
     private var configurado: Bool {
@@ -198,6 +212,24 @@ struct SettingsView: View {
         carregandoModelos = true
         carregarModelos(geracao: geracao)
         verificarConexao(geracao: geracao)
+    }
+
+    /// Persiste a key no Keychain (D7) em commit/blur — nunca a cada tecla.
+    /// Campo esvaziado chama `apagar()`; falha do SecItemAdd vira alerta.
+    private func persistirChave() {
+        guard chaveModificada else { return }  // nada digitado desde o último save
+        let valor = chave.trimmingCharacters(in: .whitespaces)
+        if valor.isEmpty {
+            KeychainHelper.apagar()
+            erroKeychain = nil
+            chaveModificada = false
+        } else if KeychainHelper.salvar(valor) {
+            erroKeychain = nil
+            chaveModificada = false
+        } else {
+            erroKeychain = "Não foi possível salvar a API key no Keychain."
+        }
+        recarregar()
     }
 
     private func carregarModelos(geracao: Int) {

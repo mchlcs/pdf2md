@@ -6,6 +6,7 @@ Feature `--imagens` (PDF-only): extrai imagens embutidas como assets (ADR-0005).
 import os
 import tempfile
 from pathlib import Path
+from typing import Any
 
 import fitz  # PyMuPDF
 import pymupdf4llm
@@ -103,7 +104,10 @@ def pdf_to_md(
     except Exception as exc:
         raise RuntimeError("Falha ao abrir PDF — arquivo corrompido ou formato inválido") from exc
 
-    chunks = _extrair_chunks_markdown(path)
+    # FIX 3: o fallback silencioso do pymupdf4llm perde headings/tabelas —
+    # anexa aviso no mesmo canal que doc_converter usa (contexto.avisos).
+    avisos_efetivos = contexto.avisos if contexto is not None else avisos
+    chunks = _extrair_chunks_markdown(path, avisos_efetivos)
 
     try:
         partes = [
@@ -116,7 +120,7 @@ def pdf_to_md(
     return "\n\n".join(partes)
 
 
-def _extrair_chunks_markdown(path: Path) -> list[dict]:
+def _extrair_chunks_markdown(path: Path, avisos: list[str] | None = None) -> list[dict[str, Any]]:
     """
     Extrai Markdown de todas as páginas em uma única passada do pymupdf4llm.
 
@@ -125,20 +129,33 @@ def _extrair_chunks_markdown(path: Path) -> list[dict]:
 
     Fallback graceful: se pymupdf4llm falhar (PDF corrompido, formato exótico),
     retorna lista vazia — o texto bruto do fitz ainda é usado por _processar_pagina.
+    FIX 3: o fallback NÃO é mais silencioso — anexa aviso (headings/tabelas
+    podem ser perdidos) para o usuário saber que a saída é degradada.
     """
     try:
         chunks = pymupdf4llm.to_markdown(str(path), page_chunks=True)
         if isinstance(chunks, list):
             return chunks
+        _aviso_fallback_pymupdf(avisos)
         return []
     except Exception:
+        _aviso_fallback_pymupdf(avisos)
         return []
+
+
+def _aviso_fallback_pymupdf(avisos: list[str] | None) -> None:
+    """Registra o aviso de fallback (FIX 3) — sem lista de avisos, silencioso."""
+    if avisos is not None:
+        avisos.append(
+            "pymupdf4llm falhou ao extrair markdown estruturado — usando texto "
+            "bruto do PyMuPDF (headings/tabelas podem ser perdidos)"
+        )
 
 
 def _processar_pagina(
     doc: fitz.Document,
     num_pagina: int,
-    chunks: list[dict],
+    chunks: list[dict[str, Any]],
     ignorar_margens: float,
     contexto: ContextoAssets | None = None,
 ) -> str:
@@ -161,7 +178,7 @@ def _processar_pagina(
     return _ocr_pagina(pagina, num_pagina, contexto)
 
 
-def _texto_nativo_pagina(num_pagina: int, chunks: list[dict], texto_bruto: str) -> str:
+def _texto_nativo_pagina(num_pagina: int, chunks: list[dict[str, Any]], texto_bruto: str) -> str:
     """Retorna o Markdown do chunk correspondente, com fallback para texto bruto."""
     if num_pagina < len(chunks):
         md = (chunks[num_pagina].get("text") or "").strip()
@@ -232,9 +249,13 @@ def _persistir_render_pagina(
     from core.pdf_images import caminho_seguro, preparar_assets_dir
 
     if contexto.coletor.atingiu_limite():
-        contexto.avisos.append(
-            "limite de imagens por documento excedido — renders de páginas-scan interrompidos"
-        )
+        # FIX 4: guard anti-duplicação — 10k páginas-scan geravam 9.5k
+        # avisos idênticos (mesmo padrão de doc_converter._montar_handler).
+        if not contexto.aviso_limite_renders:
+            contexto.avisos.append(
+                "limite de imagens por documento excedido — renders de páginas-scan interrompidos"
+            )
+            contexto.aviso_limite_renders = True
         return texto
 
     dados = pix.tobytes("png")

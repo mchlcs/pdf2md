@@ -114,7 +114,16 @@ def image_to_md(path: Path) -> str:
                 )
 
             # OCR
-            texto = pytesseract.image_to_string(img_cinza, lang="por+eng")
+            texto: str = pytesseract.image_to_string(img_cinza, lang="por+eng")
+    except pytesseract.TesseractError as exc:
+        # FIX 7: TesseractError (ex: pacote de idioma ausente) NÃO é arquivo
+        # corrompido — a mensagem antiga ("verifique se o arquivo está
+        # corrompido") levava o usuário para o diagnóstico errado. Sem
+        # str(exc) (pode conter path do tessdata — CWE-209).
+        raise RuntimeError(
+            "Falha no OCR — Tesseract não conseguiu processar a imagem "
+            "(idioma ausente?). Instale: brew install tesseract tesseract-lang"
+        ) from exc
     except Exception as exc:
         raise RuntimeError("Falha no processamento da imagem — verifique se o arquivo está corrompido") from exc
 

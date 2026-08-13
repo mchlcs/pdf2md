@@ -4,7 +4,15 @@
 
 | Version | Supported |
 |---------|-----------|
-| 0.1.x   | ✅ |
+| 0.6.x   | ✅ (versão atual — única com fixes ativos) |
+| 0.5.x   | ❌ |
+| 0.4.x   | ❌ |
+| 0.3.x   | ❌ |
+| 0.2.x   | ❌ |
+| 0.1.x   | ❌ |
+
+> Apenas a versão mais recente (0.6.x) recebe correções de segurança ativas;
+> versões anteriores não recebem backports.
 
 ## Reporting a Vulnerability
 
@@ -39,6 +47,7 @@ Este projeto processa arquivos PDF locais. Superfície de ataque:
 |---|---|---|
 | **App não-sandboxed** (sem entitlements) | Distribuição ad-hoc sem Developer ID; sandbox exigiria `com.apple.security.network.client` e re-assinatura estável | ADR-0007 |
 | **Keychain sem access group** | App não-sandboxed: qualquer processo do mesmo usuário que conheça service/account lê o item — aceito para app desktop pessoal ad-hoc | ADR-0007 |
+| **Prompt injection** | Texto do documento (não-confiável) vai ao LLM sem isolamento de instruções (`core/llm_enhancer.py`) — a saída pode ser influenciada por conteúdo malicioso do PDF | ADR-0004 |
 | **SSRF sem blocklist de IP privado/metadata** | A URL do LLM vem do próprio usuário (Settings/env), não de documento — `localhost` é o caso de uso principal (Ollama) | ADR-0004/0007 |
 
 ## Fora do escopo

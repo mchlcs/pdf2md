@@ -10,12 +10,18 @@ import pytest
 
 from core.llm_enhancer import (
     ConfigLLM,
+    _erro_seguro,
     _url,
     disponivel,
     listar_modelos,
     melhorar_markdown,
     ocr_com_visao,
-    testar,
+)
+from core.llm_enhancer import (
+    # Alias com underscore: pytest coleta funções que começam com "test" —
+    # o import direto de `testar` virava um teste-fantasma que fazia chamada
+    # de rede real a localhost:11434 durante a suíte.
+    testar as _testar_llm,
 )
 
 # ── Helper: mock de resposta HTTP ────────────────────────────────────────────
@@ -463,7 +469,7 @@ def test_listar_modelos_url_invalida_erro_seguro():
 def test_testar_ok_mede_latencia():
     """testar() retorna ok=True com latência medida em ms."""
     with patch("urllib.request.urlopen", return_value=_mock_models_response([])):
-        resultado = testar()
+        resultado = _testar_llm()
 
     assert resultado["ok"] is True
     assert isinstance(resultado["latencia_ms"], int)
@@ -474,8 +480,147 @@ def test_testar_falha_erro_seguro():
     """Falha de conexão → ok=False com erro seguro (CWE-209)."""
     os.environ.pop("PDF2MD_LLM_URL", None)
     with patch("urllib.request.urlopen", side_effect=OSError("Connection refused")):
-        resultado = testar()
+        resultado = _testar_llm()
 
     assert resultado["ok"] is False
     assert resultado["latencia_ms"] is None
     assert resultado["erro"] == "OSError"
+
+
+# ── TAREFA 4: branches sem cobertura ─────────────────────────────────────────
+
+def _mock_resp_bytes(corpo: bytes) -> MagicMock:
+    """Mock de resposta HTTP com corpo JSON arbitrário (válido ou não)."""
+    resp = MagicMock()
+    resp.read.return_value = corpo
+    resp.__enter__ = lambda s: s
+    resp.__exit__ = MagicMock(return_value=False)
+    return resp
+
+
+def test_erro_seguro_timeout_vira_timeout():
+    """TimeoutError vira a mensagem segura 'timeout' (CWE-209)."""
+    assert _erro_seguro(TimeoutError("timed out")) == "timeout"
+
+
+def test_testar_timeout_erro_seguro():
+    """testar() com TimeoutError → ok=False e erro 'timeout'."""
+    with patch("urllib.request.urlopen", side_effect=TimeoutError("timed out")):
+        resultado = _testar_llm()
+
+    assert resultado["ok"] is False
+    assert resultado["erro"] == "timeout"
+
+
+def test_melhorar_markdown_conteudo_nao_str(tmp_path):
+    """Content não-str (dict) → TypeError controlado, original preservado.
+
+    _completar exige str no contrato; resposta em formato inesperado não
+    pode vazar para o Markdown final.
+    """
+    f = tmp_path / "doc.pdf"
+    f.write_bytes(b"x")
+    corpo = json.dumps({"choices": [{"message": {"content": {"nada": 1}}}]}).encode("utf-8")
+
+    with patch("urllib.request.urlopen", return_value=_mock_resp_bytes(corpo)):
+        resultado, avisos = melhorar_markdown("texto original", f)
+
+    assert resultado == "texto original"
+    assert any("TypeError" in aviso for aviso in avisos)
+
+
+def test_listar_modelos_resposta_nao_dict():
+    """Resposta JSON não-dict (lista) → (None, 'resposta inesperada')."""
+    with patch("urllib.request.urlopen", return_value=_mock_resp_bytes(b'["a", "b"]')):
+        modelos, erro = listar_modelos()
+
+    assert modelos is None
+    assert erro == "resposta inesperada"
+
+
+def test_testar_resposta_nao_dict():
+    """testar() com resposta não-dict → ok=False, sem latência."""
+    with patch("urllib.request.urlopen", return_value=_mock_resp_bytes(b'["a", "b"]')):
+        resultado = _testar_llm()
+
+    assert resultado["ok"] is False
+    assert resultado["latencia_ms"] is None
+    assert resultado["erro"] == "resposta inesperada"
+
+
+def test_testar_url_invalida_erro_de_validacao():
+    """testar() com URL insegura → ok=False com erro de validação (SSRF)."""
+    resultado = _testar_llm(ConfigLLM(url="file:///etc/passwd"))
+
+    assert resultado["ok"] is False
+    assert "http ou https" in resultado["erro"]
+
+
+def test_listar_modelos_show_falha_visao_desconhecida():
+    """Falha do /api/show (Ollama) → visao None, sem derrubar a listagem."""
+    from urllib.error import HTTPError
+
+    chamadas = []
+
+    def responder(req, timeout=None):
+        chamadas.append(req.full_url)
+        if req.full_url.endswith("/models"):
+            return _mock_models_response(["llama3.2-vision"])
+        raise HTTPError("http://localhost:11434/api/show", 500, "Internal", {}, None)
+
+    config = ConfigLLM(url="http://localhost:11434/v1")
+    with patch("urllib.request.urlopen", side_effect=responder):
+        modelos, erro = listar_modelos(config)
+
+    assert erro is None
+    assert modelos == [{"id": "llama3.2-vision", "visao": None}]
+    assert any("/api/show" in url for url in chamadas)
+
+
+def test_listar_modelos_show_flag_visao_no_nivel_raiz():
+    """/api/show com 'vision' no nível raiz (sem model_info) → True."""
+    chamadas = []
+
+    def responder(req, timeout=None):
+        chamadas.append(req.full_url)
+        if req.full_url.endswith("/models"):
+            return _mock_models_response(["llama3.2-vision"])
+        return _mock_resp_bytes(json.dumps({"vision": True}).encode("utf-8"))
+
+    config = ConfigLLM(url="http://localhost:11434/v1")
+    with patch("urllib.request.urlopen", side_effect=responder):
+        modelos, _ = listar_modelos(config)
+
+    assert modelos == [{"id": "llama3.2-vision", "visao": True}]
+
+
+def test_listar_modelos_show_sem_flag_visao():
+    """/api/show sem flag vision → visao None (desconhecido)."""
+    def responder(req, timeout=None):
+        if req.full_url.endswith("/models"):
+            return _mock_models_response(["llama3.2-vision"])
+        return _mock_resp_bytes(json.dumps({"model_info": {"foo": 1}}).encode("utf-8"))
+
+    config = ConfigLLM(url="http://localhost:11434/v1")
+    with patch("urllib.request.urlopen", side_effect=responder):
+        modelos, _ = listar_modelos(config)
+
+    assert modelos == [{"id": "llama3.2-vision", "visao": None}]
+
+
+def test_listar_modelos_json_malformado():
+    """JSON inválido do endpoint → (None, 'JSONDecodeError'), sem crash."""
+    with patch("urllib.request.urlopen", return_value=_mock_resp_bytes(b"isto nao e json")):
+        modelos, erro = listar_modelos()
+
+    assert modelos is None
+    assert erro == "JSONDecodeError"
+
+
+def test_testar_json_malformado():
+    """JSON inválido do endpoint → ok=False com erro seguro."""
+    with patch("urllib.request.urlopen", return_value=_mock_resp_bytes(b"isto nao e json")):
+        resultado = _testar_llm()
+
+    assert resultado["ok"] is False
+    assert resultado["erro"] == "JSONDecodeError"

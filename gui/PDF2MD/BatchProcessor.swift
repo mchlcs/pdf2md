@@ -5,11 +5,6 @@ import Foundation
 import Combine
 import UserNotifications
 
-/// Container do processo ativo atravessando closures @Sendable (cancelamento).
-final class ProcessoBox: @unchecked Sendable {
-    var processo: Process?
-}
-
 struct ProgressoArquivo: Identifiable, Codable {
     let id: String       // path do arquivo origem
     let status: String   // "aguardando" | "processando" | "concluido" | "erro" | "cancelado" | "ignorado"
@@ -43,9 +38,8 @@ class BatchProcessor: ObservableObject {
     @Published var estaProcessando: Bool = false
     @Published var concluido: Bool = false
     @Published var duracaoTotal: TimeInterval?   // duração total da última conversão
-
-    // Processo ativo — referência para cancelamento imediato
-    private var processoAtivo: Process?
+    @Published var inicioConversao: Date?        // início da conversão em curso (feedback de tempo)
+    @Published var erroFatal: String?            // falha de execução inteira (FIX 2): alerta no ContentView
 
     // Localiza binário Python embarcado no bundle
     private var caminhoBinario: URL? {
@@ -62,29 +56,51 @@ class BatchProcessor: ObservableObject {
         llmModelo: String? = nil,
         llmKey: String? = nil
     ) async {
+        erroFatal = nil  // limpa alerta anterior (FIX 2)
+
         guard let binario = caminhoBinario else {
-            print("Binário pdf2md não encontrado no bundle")
+            // FIX 2: antes, binário ausente era só print no console e a UI
+            // ficava sem feedback — agora vira alerta visível.
+            erroFatal = "Binário pdf2md não encontrado no bundle"
             return
         }
 
         // Evita reentrância: ignora novo início enquanto uma conversão corre.
         // Sem isto, cancelar+reconverter cria duas execuções que se atropelam
-        // no MainActor (zerando estaProcessando/processoAtivo da nova).
+        // no MainActor (zerando estaProcessando da nova).
         guard !estaProcessando else { return }
+
+        // Confinamento ao home para DESTINO/VAULT (FIX 3): antes só a origem
+        // era validada aqui — destino/vault fora do home eram rejeitados pelo
+        // CLI com erro genérico sem explicação. Falha rápida com alerta claro.
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        if let v = vault {
+            let vSeguro = v.resolvingSymlinksInPath()
+            guard Self.dentroDoHome(vSeguro.path, home: home) else {
+                erroFatal = "Vault fora do diretório home"
+                return
+            }
+        } else if let dest = destino {
+            let destSeguro = dest.resolvingSymlinksInPath()
+            guard Self.dentroDoHome(destSeguro.path, home: home) else {
+                erroFatal = "Pasta de saída fora do diretório home"
+                return
+            }
+        }
 
         estaProcessando = true
         concluido = false
         duracaoTotal = nil
+        inicioConversao = Date()
         progresso.removeAll()  // cada execução exibe apenas seus próprios arquivos
         let inicioTotal = Date()
 
         // Sanitização: filtrar URLs fora do diretório home ANTES de processar
-        let home = FileManager.default.homeDirectoryForCurrentUser
         let arquivosValidos: [URL] = arquivos.compactMap { url in
             let seguro = url.resolvingSymlinksInPath()
-            // Confinamento com fronteira de componente: home.path sem "/" final
-            // deixaria /Users/bob prefixar /Users/bobby. Exige igualdade ou "/".
-            guard seguro.path == home.path || seguro.path.hasPrefix(home.path + "/") else {
+            // Confinamento com fronteira de componente (ver dentroDoHome):
+            // home.path sem "/" final deixaria /Users/bob prefixar /Users/bobby.
+            guard Self.dentroDoHome(seguro.path, home: home) else {
                 let rejeitado = ProgressoArquivo(
                     id: url.path,
                     status: "erro",
@@ -145,22 +161,14 @@ class BatchProcessor: ObservableObject {
                 if let key = llmKey { envLLM["PDF2MD_LLM_KEY"] = key }
             }
 
-            // Guarda referência para cancelamento imediato. O callback roda
-            // antes da primeira suspensão (contexto do chamador); o box
-            // atravessa a fronteira Sendable sem isolamento de actor.
-            let processoBox = ProcessoBox()
-            let stdoutData: Data? = await withTaskCancellationHandler {
-                await ProcessRunner.executar(
-                    binario: binario,
-                    args: args,
-                    env: envLLM.isEmpty ? nil : envLLM,
-                    onProcesso: { processoBox.processo = $0 }
-                )
-            } onCancel: {
-                if let ativo = processoBox.processo, ativo.isRunning {
-                    ativo.terminate()
-                }
-            }
+            // Cancelamento é responsabilidade do ProcessRunner: SIGTERM +
+            // fechar pipes + SIGKILL em graça. A task cancelada retorna
+            // AQUI imediatamente, sem depender do processo morrer.
+            let resultado = await ProcessRunner.executar(
+                binario: binario,
+                args: args,
+                env: envLLM.isEmpty ? nil : envLLM
+            )
 
             // Se foi cancelado durante a espera
             if Task.isCancelled {
@@ -168,9 +176,21 @@ class BatchProcessor: ObservableObject {
                 continue
             }
 
-            // ProcessRunner devolve nil quando o binário não iniciou
-            // (ex.: não encontrado no bundle) — conversão sempre emite JSON.
-            guard let stdoutData = stdoutData else {
+            // Exit != 0: o CLI rejeitou a conversão (validação de path,
+            // Tesseract ausente, vault inválido…). A mensagem real vai no
+            // stderr (rich Console(stderr=True)); antes, drenada e
+            // descartada, tudo virava o erro genérico abaixo (FIX 1).
+            if resultado.exitCode != 0 {
+                atualizarProgresso(
+                    id: url.path,
+                    status: "erro",
+                    erro: Self.mensagemErro(resultado.stderr)
+                )
+                continue
+            }
+
+            // Exit 0 sem stdout: contrato quebrado — conversão sempre emite JSON.
+            guard let stdoutData = resultado.stdout else {
                 atualizarProgresso(id: url.path, status: "erro", erro: "Falha ao executar processo")
                 continue
             }
@@ -178,17 +198,24 @@ class BatchProcessor: ObservableObject {
             if let string = String(data: stdoutData, encoding: .utf8) {
                 for linha in string.split(separator: "\n") {
                     if let jsonData = String(linha).data(using: .utf8),
-                       let item = try? JSONDecoder().decode(ProgressoArquivo.self, from: jsonData) {
-                        atualizarProgresso(id: item.id, status: item.status, erro: item.erro)
+                       var item = try? JSONDecoder().decode(ProgressoArquivo.self, from: jsonData) {
+                        // FIX 6: o JSON do CLI não distingue "destino já existe"
+                        // de extensão não suportada — infere pelo filesystem.
+                        if item.status == "ignorado" && item.avisos.isEmpty {
+                            item = anexarMotivoIgnorado(item, base: vault ?? destino)
+                        }
+                        // Avisos de qualidade acompanham o resultado (ADR-0005):
+                        // o âmbar no statusIcon depende deles chegarem até aqui.
+                        atualizarProgresso(id: item.id, status: item.status, erro: item.erro, avisos: item.avisos)
                     }
                 }
             }
         }
 
-        processoAtivo = nil
         estaProcessando = false
         concluido = true  // conversão terminou (concluída ou cancelada) → habilita "Limpar"
         duracaoTotal = Date().timeIntervalSince(inicioTotal)
+        inicioConversao = nil
 
         // Notifica só em término natural; cancelamento manual não dispara alerta.
         if !Task.isCancelled {
@@ -196,20 +223,42 @@ class BatchProcessor: ObservableObject {
         }
     }
 
-    /// Cancela conversão em curso — termina o processo ativo para interromper
-    /// o `await` imediatamente. O estado de UI (estaProcessando/concluido) é
-    /// liquidado pelo loop em iniciarConversao, mantendo um único dono do estado
-    /// e evitando a corrida de teardown ao reconverter.
-    func cancelar() {
-        if processoAtivo?.isRunning == true {
-            processoAtivo?.terminate()
-        }
-    }
-
     private func atualizarProgresso(id: String, status: String, erro: String?, avisos: [String] = []) {
         if let index = progresso.firstIndex(where: { $0.id == id }) {
             progresso[index] = ProgressoArquivo(id: id, status: status, erro: erro, avisos: avisos)
         }
+    }
+
+    /// Confinamento ao diretório home com fronteira de componente (FIX 3):
+    /// home.path sem "/" final deixaria /Users/bob prefixar /Users/bobby.
+    private static func dentroDoHome(_ path: String, home: URL) -> Bool {
+        path == home.path || path.hasPrefix(home.path + "/")
+    }
+
+    /// Mensagem legível do stderr do CLI, truncada para o alerta/linha da
+    /// lista. Fallback para o erro genérico quando não há stderr (FIX 1).
+    static func mensagemErro(_ stderr: Data?) -> String {
+        guard let stderr,
+              let texto = String(data: stderr, encoding: .utf8)?
+                  .trimmingCharacters(in: .whitespacesAndNewlines),
+              !texto.isEmpty else {
+            return "Falha ao executar processo"
+        }
+        return String(texto.prefix(300))
+    }
+
+    /// FIX 6: reconversão de arquivo existente chega como "ignorado" sem
+    /// motivo (a GUI nunca passa --sobrescrever). A GUI chama o binário por
+    /// arquivo, então o destino esperado é sempre `<base>/<stem>.md` — sem o
+    /// dedup de nomes do batch. Se o .md já existe, anexa aviso explicativo.
+    private func anexarMotivoIgnorado(_ item: ProgressoArquivo, base: URL?) -> ProgressoArquivo {
+        guard let base else { return item }
+        let origem = URL(fileURLWithPath: item.id)
+        let nomeMD = origem.deletingPathExtension().lastPathComponent + ".md"
+        if FileManager.default.fileExists(atPath: base.appendingPathComponent(nomeMD).path) {
+            return ProgressoArquivo(id: item.id, status: item.status, erro: nil, avisos: ["destino já existe"])
+        }
+        return item
     }
 
     private func emitirNotificacao() {
@@ -259,6 +308,7 @@ class BatchProcessor: ObservableObject {
         estaProcessando = false
         concluido = false
         duracaoTotal = nil
-        processoAtivo = nil
+        inicioConversao = nil
+        erroFatal = nil
     }
 }

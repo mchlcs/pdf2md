@@ -12,6 +12,7 @@ from typing import Any
 from core.converter import pdf_to_md
 from core.doc_converter import doc_to_md
 from core.formatter import add_obsidian_frontmatter
+from core.image_assets import slugificar_ascii
 from core.image_converter import image_to_md
 from core.llm_enhancer import ConfigLLM
 from core.pptx_converter import pptx_to_md
@@ -91,7 +92,7 @@ def _processar_arquivo(
     llm_config: ConfigLLM | None = None,
     modo_imagem: ModoImagem = ModoImagem.transcrever,
     assets_dir_str: str | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """
     Worker executado em ThreadPoolExecutor. Recebe/retorna tipos simples
     (strings, dict) para uma fronteira de dados limpa entre as threads.
@@ -183,12 +184,24 @@ def _resolver_assets(
     No batch, `destino` é o caminho do .md (arquivo) — o diretório é .parent.
     """
     destino_efetivo = destino.parent if destino else origem.parent
-    prefixo = f"{destino.stem}__" if destino else f"{origem.stem}__"
     if assets_dir_str:
-        return Path(assets_dir_str), prefixo
+        return Path(assets_dir_str), _prefixo_seguro(destino, origem)
     if obsidian:
-        return destino_efetivo / "attachments", prefixo
+        return destino_efetivo / "attachments", _prefixo_seguro(destino, origem)
     return destino_efetivo / f"{origem.stem}_assets", ""
+
+
+def _prefixo_seguro(destino: Path | None, origem: Path) -> str:
+    """Prefixo de nomes com caracteres garantidamente ASCII (FIX 1).
+
+    O stem pode conter espaço/acento ("Relatório Final") — usado cru,
+    o prefixo violava o regex de nome seguro de `caminho_seguro` e o
+    arquivo inteiro virava ERRO em --obsidian/--assets-dir. Aplica
+    slugificar_ascii (mesma regra de `doc_converter._montar_handler`,
+    que recebe o prefixo via ContextoAssets).
+    """
+    base = destino.stem if destino else origem.stem
+    return slugificar_ascii(f"{base}__")
 
 
 def _kwargs_assets(
@@ -247,7 +260,7 @@ def _docx_to_md(
     )
 
 
-def _resultado_ignorado(origem_str: str, destino_str: str | None) -> dict:
+def _resultado_ignorado(origem_str: str, destino_str: str | None) -> dict[str, Any]:
     """Retorna dict de resultado para arquivo ignorado (destino já existe ou extensão não suportada)."""
     return {
         "origem": origem_str,
@@ -258,7 +271,7 @@ def _resultado_ignorado(origem_str: str, destino_str: str | None) -> dict:
     }
 
 
-def _resultado_erro(origem_str: str, exc: Exception) -> dict:
+def _resultado_erro(origem_str: str, exc: Exception) -> dict[str, Any]:
     """Retorna dict de resultado para arquivo com erro (path sanitizado)."""
     msg = sanitizar_mensagem_erro(str(exc))
     return {

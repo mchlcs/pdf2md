@@ -1,5 +1,7 @@
 """Testes para core/batch.py."""
 
+from pathlib import Path
+
 import fitz
 import pytest
 from PIL import Image, ImageDraw
@@ -456,3 +458,135 @@ def test_batch_imagens_stem_colidido_nao_sobrescreve(tmp_path):
     assert len(arquivos) == 2  # nenhum asset foi sobrescrito
     # Ordenação: rel.docx → rel.md (prefixo rel__), rel.pdf → rel-pdf.md
     assert arquivos == ["rel-pdf__img_p001_0.png", "rel__img_0001.png"]
+
+
+# ── TAREFA 5: exceção real no worker, colisão 3+, subdiretórios ─────────────
+
+def test_batch_pdf_corrompido_erro_sanitizado_sem_interromper(tmp_path):
+    """PDF corrompido no diretório → ERRO sanitizado; o batch continua.
+
+    Regressão de robustez: a exceção real do worker não pode derrubar os
+    demais arquivos nem vazar paths absolutos na mensagem de erro.
+    """
+    entrada = tmp_path / "entrada"
+    entrada.mkdir()
+
+    # PDF válido
+    doc = fitz.open()
+    p = doc.new_page(width=595, height=842)
+    p.insert_text((50, 50), "PDF valido do lote.")
+    doc.save(str(entrada / "bom.pdf"))
+    doc.close()
+
+    # PDF corrompido (não abre no PyMuPDF)
+    (entrada / "quebrado.pdf").write_bytes(b"%PDF-1.4\n% lixo nao estrutura valida")
+
+    resultados = batch_convert(origem=entrada, destino=tmp_path / "saida", workers=2)
+
+    assert len(resultados) == 2
+    por_status = {r.status: r for r in resultados}
+    assert por_status[StatusArquivo.CONCLUIDO].destino.exists()
+    erro = por_status[StatusArquivo.ERRO]
+    assert erro.erro is not None and erro.erro != ""
+    assert "Traceback" not in erro.erro
+    assert str(tmp_path) not in erro.erro  # path sanitizado (CWE-209)
+
+
+def test_processar_arquivo_excecao_vira_erro_sanitizado(tmp_path):
+    """Worker direto: exceção real → dict de ERRO, sem propagar."""
+    from core.batch import _processar_arquivo
+
+    origem = tmp_path / "quebrado.pdf"
+    origem.write_bytes(b"%PDF-1.4\n% lixo")
+
+    resultado = _processar_arquivo(str(origem), str(tmp_path / "saida" / "quebrado.md"), False, False)
+
+    assert resultado["status"] == "erro"
+    assert resultado["destino"] is None
+    assert resultado["erro"] is not None
+    assert str(tmp_path) not in resultado["erro"]  # sanitizado
+
+
+def test_batch_colisao_stem_tres_arquivos(tmp_path):
+    """3 arquivos com o mesmo stem (pdf/docx/pptx) → 3 MDs distintos.
+
+    Estende a regressão de data race para 3+ formatos: cada arquivo ganha
+    nome único via sufixo de extensão, sem sobrescrita silenciosa.
+    """
+    from docx import Document
+    from pptx import Presentation
+
+    entrada = tmp_path / "entrada"
+    entrada.mkdir()
+
+    doc = fitz.open()
+    p = doc.new_page(width=595, height=842)
+    p.insert_text((50, 50), "Conteudo do PDF de relatorio para validacao do batch converter.")
+    doc.save(str(entrada / "rel.pdf"))
+    doc.close()
+
+    docx = Document()
+    docx.add_paragraph("Conteudo do DOCX de relatorio para validacao.")
+    docx.save(str(entrada / "rel.docx"))
+
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[5])
+    slide.shapes.title.text = "Relatorio PPTX"
+    prs.save(str(entrada / "rel.pptx"))
+
+    resultados = batch_convert(origem=entrada, destino=tmp_path / "saida", workers=3)
+
+    concluidos = [r for r in resultados if r.status == StatusArquivo.CONCLUIDO]
+    assert len(concluidos) == 3
+    destinos = {r.destino for r in concluidos}
+    assert len(destinos) == 3  # nenhuma colisão de nome
+    for d in destinos:
+        assert d is not None and d.exists()
+        assert d.read_text(encoding="utf-8").strip() != ""
+
+
+def test_nome_destino_unico_contador_2():
+    """Colisão no candidato com sufixo → contador -2, -3, ..."""
+    from core.batch import _nome_destino_unico
+
+    usados = {"rel.md", "rel-docx.md"}
+    assert _nome_destino_unico(Path("rel.docx"), usados) == "rel-docx-2.md"
+    usados.add("rel-docx-2.md")
+    assert _nome_destino_unico(Path("rel.docx"), usados) == "rel-docx-3.md"
+
+
+def test_batch_subdiretorio_ignorado(tmp_path):
+    """Subdiretório dentro do lote é ignorado (varredura não recursiva)."""
+    entrada = tmp_path / "entrada"
+    sub = entrada / "subpasta"
+    sub.mkdir(parents=True)
+
+    doc = fitz.open()
+    p = doc.new_page(width=595, height=842)
+    p.insert_text((50, 50), "PDF da raiz.")
+    doc.save(str(entrada / "raiz.pdf"))
+    doc.close()
+
+    doc2 = fitz.open()
+    p2 = doc2.new_page(width=595, height=842)
+    p2.insert_text((50, 50), "PDF dentro da subpasta.")
+    doc2.save(str(sub / "aninhado.pdf"))
+    doc2.close()
+
+    resultados = batch_convert(origem=entrada, destino=tmp_path / "saida", workers=1)
+
+    assert len(resultados) == 1
+    assert resultados[0].status == StatusArquivo.CONCLUIDO
+    assert resultados[0].origem.name == "raiz.pdf"
+    assert not (tmp_path / "saida" / "aninhado.md").exists()
+
+
+def test_batch_diretorio_apenas_subpasta_sem_resultados(tmp_path):
+    """Diretório só com subpasta → nenhum resultado, sem crash."""
+    entrada = tmp_path / "entrada"
+    (entrada / "subpasta").mkdir(parents=True)
+    (entrada / "subpasta" / "x.pdf").write_bytes(b"%PDF-1.4 dummy")
+
+    resultados = batch_convert(origem=entrada, destino=tmp_path / "saida", workers=1)
+
+    assert resultados == []
