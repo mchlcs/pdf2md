@@ -25,6 +25,21 @@ Exemplos de configuração:
   PDF2MD_LLM_URL=https://api.groq.com/openai/v1
   PDF2MD_LLM_KEY=sua_chave_groq
   PDF2MD_LLM_MODEL=llama-3.1-8b-instant
+
+  # OpenCode Zen (open-source models hospedados)
+  PDF2MD_LLM_URL=https://opencode.ai/zen/v1
+  PDF2MD_LLM_KEY=sua_chave_opencode
+  PDF2MD_LLM_MODEL=deepseek-v4-flash
+
+  # OpenCode Go (modelos fechados: grok, kimi, deepseek)
+  PDF2MD_LLM_URL=https://opencode.ai/zen/go/v1
+  PDF2MD_LLM_KEY=sua_chave_opencode
+  PDF2MD_LLM_MODEL=grok-4.5
+
+  # Ollama Cloud (modelos hospedados pela Ollama)
+  PDF2MD_LLM_URL=https://ollama.com/v1
+  PDF2MD_LLM_KEY=sua_chave_ollama_cloud
+  PDF2MD_LLM_MODEL=gpt-oss:120b
 """
 
 import base64

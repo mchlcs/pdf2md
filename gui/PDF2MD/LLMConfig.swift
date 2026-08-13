@@ -2,10 +2,13 @@
 // Configuração do LLM (provedor/modelo/URL) para a GUI.
 //
 // Espelha o docstring de core/llm_enhancer.py:
-//   Ollama     http://localhost:11434/v1            (sem key)
-//   Gemini     https://generativelanguage.googleapis.com/v1beta/openai/
-//   Groq       https://api.groq.com/openai/v1
-//   OpenRouter https://openrouter.ai/api/v1
+//   Ollama       http://localhost:11434/v1            (sem key)
+//   Gemini       https://generativelanguage.googleapis.com/v1beta/openai/
+//   Groq         https://api.groq.com/openai/v1
+//   OpenRouter   https://openrouter.ai/api/v1
+//   OpenCode Zen https://opencode.ai/zen/v1
+//   OpenCode Go  https://opencode.ai/zen/go/v1
+//   Ollama Cloud https://ollama.com/v1
 //
 // Precedência de resolução da URL: personalizado (campo livre) > preset.
 // O modelo é sincronizado com o Python via PDF2MD_LLM_MODEL (environment),
@@ -19,6 +22,9 @@ enum LLMProvider: String, CaseIterable, Identifiable {
     case gemini
     case groq
     case openrouter
+    case opencodeZen
+    case opencodeGo
+    case ollamaCloud
     case personalizado
 
     var id: String { rawValue }
@@ -29,6 +35,9 @@ enum LLMProvider: String, CaseIterable, Identifiable {
         case .gemini: return "Gemini"
         case .groq: return "Groq"
         case .openrouter: return "OpenRouter"
+        case .opencodeZen: return "OpenCode Zen"
+        case .opencodeGo: return "OpenCode Go"
+        case .ollamaCloud: return "Ollama Cloud"
         case .personalizado: return "Personalizado…"
         }
     }
@@ -40,14 +49,17 @@ enum LLMProvider: String, CaseIterable, Identifiable {
         case .gemini: return "https://generativelanguage.googleapis.com/v1beta/openai/"
         case .groq: return "https://api.groq.com/openai/v1"
         case .openrouter: return "https://openrouter.ai/api/v1"
+        case .opencodeZen: return "https://opencode.ai/zen/v1"
+        case .opencodeGo: return "https://opencode.ai/zen/go/v1"
+        case .ollamaCloud: return "https://ollama.com/v1"
         case .personalizado: return nil
         }
     }
 
     var requerKey: Bool {
         switch self {
-        case .ollama: return false  // Ollama não valida key
-        default: return true
+        case .ollama: return false  // Ollama local não valida key
+        default: return true        // nuvem (inclui OpenCode e Ollama Cloud)
         }
     }
 
@@ -67,6 +79,9 @@ enum LLMProvider: String, CaseIterable, Identifiable {
         case .gemini: return ["gemini-2.0-flash"]
         case .groq: return ["llama-3.1-8b-instant"]
         case .openrouter: return ["anthropic/claude-3.5-sonnet"]
+        case .opencodeZen: return ["deepseek-v4-flash", "deepseek-v4-pro", "kimi-k2.6", "glm-5.2"]
+        case .opencodeGo: return ["grok-4.5", "kimi-k3", "deepseek-v4-pro", "deepseek-v4-flash"]
+        case .ollamaCloud: return ["gpt-oss:120b", "glm-5:cloud", "kimi-k2.6"]
         case .personalizado: return []
         }
     }
