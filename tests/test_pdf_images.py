@@ -256,3 +256,178 @@ def test_scan_renders_contam_no_limite(tmp_path, mock_tesseract):
     assert len(list(assets.iterdir())) == 1  # só o primeiro render
     assert any("limite" in a for a in avisos)
     assert md.count("![[") + md.count("![") == 1
+
+
+# ── TAREFA 3: imagem danificada, dados vazios, CMYK→RGB, defesas ────────────
+
+def test_extrair_bruto_excecao_imagem_danificada(tmp_path):
+    """Imagem danificada (extract_image lança) → None, sem propagar exceção.
+
+    O aviso 'não pôde ser extraída' é emitido pelo chamador; a exceção
+    interna é engolida na fronteira da extração.
+    """
+    pdf = _pdf_com_imagens(tmp_path, qtd=1)
+    assets_dir = tmp_path / "assets"
+
+    with (
+        fitz.open(str(pdf)) as doc,
+        patch("fitz.Document.extract_image", side_effect=RuntimeError("imagem danificada")),
+    ):
+        assets, avisos = extrair_imagens(doc, 0, assets_dir)
+
+    assert assets == []
+    assert len(avisos) == 1
+    assert "não pôde ser extraída" in avisos[0]
+
+
+def test_extrair_bruto_dados_vazios(tmp_path):
+    """extract_image sem bytes de imagem (vazio) → None (não é asset)."""
+    from core.pdf_images import _extrair_bruto
+
+    pdf = _pdf_com_imagens(tmp_path, qtd=1)
+    with (
+        fitz.open(str(pdf)) as doc,
+        patch("fitz.Document.extract_image", return_value={"image": b"", "ext": "png"}),
+    ):
+        assert _extrair_bruto(doc, doc[0].get_images(full=True)[0][0]) is None
+
+
+def test_extrair_bruto_sem_extensao_usa_png(tmp_path):
+    """extract_image sem campo 'ext' → extensão padrão .png."""
+    from core.pdf_images import _extrair_bruto
+
+    pdf = _pdf_com_imagens(tmp_path, qtd=1)
+    with (
+        fitz.open(str(pdf)) as doc,
+        patch("fitz.Document.extract_image", return_value={"image": b"dados"}),
+    ):
+        dados, ext = _extrair_bruto(doc, doc[0].get_images(full=True)[0][0])
+
+    assert dados == b"dados"
+    assert ext == ".png"
+
+
+def test_extrair_bruto_ext_fora_allowlist_converte(tmp_path):
+    """Extensão controlada pelo documento fora da allowlist → converte PNG."""
+    from core.pdf_images import _extrair_bruto
+
+    pdf = _pdf_com_imagens(tmp_path, qtd=1)
+    with (
+        fitz.open(str(pdf)) as doc,
+        patch("fitz.Document.extract_image", return_value={"image": b"x", "ext": "php"}),
+    ):
+        dados, ext = _extrair_bruto(doc, doc[0].get_images(full=True)[0][0])
+
+    assert ext == ".png"
+    assert dados.startswith(b"\x89PNG")
+
+
+def test_extrair_bruto_conversao_falha_retorna_none(tmp_path):
+    """Conversão para PNG falha → _extrair_bruto devolve None."""
+    from core.pdf_images import _extrair_bruto
+
+    pdf = _pdf_com_imagens(tmp_path, qtd=1)
+    with (
+        fitz.open(str(pdf)) as doc,
+        patch("fitz.Document.extract_image", return_value={"image": b"x", "ext": "php"}),
+        patch("core.pdf_images._converter_png", return_value=None),
+    ):
+        assert _extrair_bruto(doc, doc[0].get_images(full=True)[0][0]) is None
+
+
+def _pdf_com_imagem_cmyk(tmp_path: Path, rgba: bool = False) -> Path:
+    """PDF com 1 imagem CMYK (JPEG) ou RGBA (PNG) embutida."""
+    if rgba:
+        img = Image.new("RGBA", (40, 40), color=(10, 200, 30, 128))
+        img_path = tmp_path / "rgba.png"
+        img.save(img_path, format="PNG")
+    else:
+        img = Image.new("CMYK", (40, 40), color=(10, 200, 30, 0))
+        img_path = tmp_path / "cmyk.jpg"
+        img.save(img_path, format="JPEG")
+
+    pdf = tmp_path / ("rgba.pdf" if rgba else "cmyk.pdf")
+    doc = fitz.open()
+    pagina = doc.new_page(width=595, height=842)
+    pagina.insert_image(fitz.Rect(20, 20, 100, 100), filename=str(img_path))
+    doc.save(str(pdf))
+    doc.close()
+    return pdf
+
+
+def test_converter_png_cmyk_para_rgb(tmp_path):
+    """CMYK (4 canais) → Pixmap convertido para RGB antes do PNG."""
+    from io import BytesIO
+
+    from core.pdf_images import _converter_png
+
+    pdf = _pdf_com_imagem_cmyk(tmp_path)
+    with fitz.open(str(pdf)) as doc:
+        xref = doc[0].get_images(full=True)[0][0]
+        dados, ext = _converter_png(doc, xref)
+
+    assert ext == ".png"
+    assert dados.startswith(b"\x89PNG")
+    with Image.open(BytesIO(dados)) as img:
+        assert img.mode == "RGB"
+
+
+def test_converter_png_rgba_mantem_alpha(tmp_path):
+    """PNG com canal alpha embutido → serialização sem crash, PNG legível.
+
+    O Pixmap de xref é construído sem alpha (default do PyMuPDF), então o
+    resultado pode sair RGB — o contrato é: PNG válido, sem exceção.
+    """
+    from io import BytesIO
+
+    from core.pdf_images import _converter_png
+
+    pdf = _pdf_com_imagem_cmyk(tmp_path, rgba=True)
+    with fitz.open(str(pdf)) as doc:
+        xref = doc[0].get_images(full=True)[0][0]
+        dados, ext = _converter_png(doc, xref)
+
+    assert ext == ".png"
+    assert dados.startswith(b"\x89PNG")
+    with Image.open(BytesIO(dados)) as img:
+        assert img.mode in ("RGB", "RGBA")
+
+
+def test_converter_png_falha_retorna_none(tmp_path):
+    """Pixmap lança (imagem corrompida) → _converter_png devolve None."""
+    from core.pdf_images import _converter_png
+
+    pdf = _pdf_com_imagens(tmp_path, qtd=1)
+    with fitz.open(str(pdf)) as doc:
+        xref = doc[0].get_images(full=True)[0][0]
+        with patch("core.pdf_images.fitz.Pixmap", side_effect=RuntimeError("pixmap falhou")):
+            assert _converter_png(doc, xref) is None
+
+
+def test_extrair_imagens_revalidacao_defesa_conversao_falha(tmp_path):
+    """Defesa em profundidade: revalidação falha → aviso, sem crash.
+
+    _extrair_bruto devolve extensão hostil; a revalidação na fronteira
+    tenta converter e, com a conversão falhando, emite o aviso padrão.
+    """
+    pdf = _pdf_com_imagens(tmp_path, qtd=1)
+    assets_dir = tmp_path / "assets"
+
+    with (
+        fitz.open(str(pdf)) as doc,
+        patch("core.pdf_images._extrair_bruto", return_value=(b"dados-brutos", ".php/../../evil")),
+        patch("core.pdf_images._converter_png", return_value=None),
+    ):
+        assets, avisos = extrair_imagens(doc, 0, assets_dir)
+
+    assert assets == []
+    assert len(avisos) == 1
+    assert "não pôde ser extraída" in avisos[0]
+
+
+def test_aviso_nao_extraida_formato():
+    """Aviso padrão de extração falha: posição + página, sem paths (CWE-209)."""
+    from core.pdf_images import _aviso_nao_extraida
+
+    assert _aviso_nao_extraida(0, 0) == "imagem 1 da página 1 não pôde ser extraída"
+    assert _aviso_nao_extraida(3, 4) == "imagem 4 da página 5 não pôde ser extraída"

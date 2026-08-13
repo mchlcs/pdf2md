@@ -1,4 +1,5 @@
 """Testes para core/doc_converter.py."""
+from io import BytesIO
 from pathlib import Path
 
 import pytest
@@ -308,3 +309,86 @@ def test_docx_limite_imagens_por_documento(tmp_path):
 
     assert md.count("![](") == 2
     assert any("limite" in a for a in avisos)
+
+
+# ── FIX 2: tamanho da imagem checado ANTES de ler os bytes ───────────────────
+
+class _StreamRastreiaLeitura(BytesIO):
+    """BytesIO que registra se read() foi chamado (prova do FIX 2).
+
+    Sem o fix, o handler chamava f.read() no stream inteiro (2 GB de um
+    docx malicioso derrubavam o processo) antes do check de 50 MB em
+    registrar_asset. Com o fix, o descarte acontece via seek/tell sem
+    nunca chamar read().
+    """
+
+    def __init__(self, dados: bytes):
+        super().__init__(dados)
+        self.read_chamado = False
+
+    def read(self, *args, **kwargs) -> bytes:
+        self.read_chamado = True
+        return super().read(*args, **kwargs)
+
+
+class _ImagemMammothFalsa:
+    """Forma mínima do objeto Image do mammoth para testar o handler."""
+
+    def __init__(self, dados: bytes, content_type: str = "image/png"):
+        self._dados = dados
+        self.content_type: str | None = content_type
+        self.alt_text: str | None = None
+        self.stream: _StreamRastreiaLeitura | None = None
+
+    def open(self) -> _StreamRastreiaLeitura:
+        self.stream = _StreamRastreiaLeitura(self._dados)
+        return self.stream
+
+
+def _handler_com_contexto(tmp_path: Path):
+    """Monta ContextoAssets + handler do mammoth isolados (sem docx real)."""
+    from core.doc_converter import _montar_handler
+    from core.image_assets import ColetorAssets, ContextoAssets
+
+    contexto = ContextoAssets(
+        modo=ModoImagem.extrair,
+        coletor=ColetorAssets(prefixo=""),
+        assets_dir=tmp_path,
+        md_dir=tmp_path,
+        wikilinks=False,
+        avisos=[],
+    )
+    return contexto, _montar_handler(contexto)
+
+
+def test_montar_handler_imagem_gigante_nao_le_bytes(tmp_path):
+    """FIX 2: imagem acima do limite é descartada SEM f.read() (seek/tell)."""
+    from unittest.mock import patch
+
+    contexto, handler = _handler_com_contexto(tmp_path)
+    imagem = _ImagemMammothFalsa(b"x" * (1024 * 1024))
+
+    with patch("core.doc_converter._MAX_BYTES_IMAGEM", 100):
+        resultado = handler(imagem)
+
+    assert resultado == {}  # descartada
+    assert imagem.stream is not None
+    assert imagem.stream.read_chamado is False  # bytes nunca materializados
+    assert contexto.avisos and "excede" in contexto.avisos[0]
+    assert not list(tmp_path.iterdir())  # nada gravado em disco
+
+
+def test_montar_handler_imagem_normal_le_bytes(tmp_path):
+    """Imagem dentro do limite continua sendo lida e gravada (não-regressão)."""
+    from unittest.mock import patch
+
+    contexto, handler = _handler_com_contexto(tmp_path)
+    imagem = _ImagemMammothFalsa(b"\x89PNG\r\n\x1a\n" + b"0" * 64)
+
+    with patch("core.doc_converter._MAX_BYTES_IMAGEM", 10**9):
+        resultado = handler(imagem)
+
+    assert imagem.stream is not None
+    assert imagem.stream.read_chamado is True
+    assert "src" in resultado
+    assert (tmp_path / "img_0001.png").exists()

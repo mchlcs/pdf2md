@@ -270,3 +270,281 @@ def test_cli_main_shim_nao_injeta_para_flag(monkeypatch):
         assert chamadas == ["app"]
         import sys as _sys
         assert _sys.argv[1] == "--help"  # sem prefixo"
+
+
+# ── TAREFA 1: contrato JSON / exit-codes reais do CLI ────────────────────────
+
+def test_cli_converter_json_linhas_de_status(tmp_path):
+    """converter --json emite 1 linha JSON por resultado (status/erro/avisos)."""
+    from core.batch import ResultadoArquivo, StatusArquivo
+
+    origem = tmp_path / "documento.docx"
+    origem.write_text("dummy")
+
+    resultados = [
+        ResultadoArquivo(
+            origem=tmp_path / "a.pdf", destino=tmp_path / "a.md",
+            status=StatusArquivo.CONCLUIDO, erro=None, avisos=[],
+        ),
+        ResultadoArquivo(
+            origem=tmp_path / "b.pdf", destino=tmp_path / "b.md",
+            status=StatusArquivo.CONCLUIDO, erro=None,
+            avisos=["palavra quebrada por hifenização"],
+        ),
+        ResultadoArquivo(
+            origem=tmp_path / "c.pdf", destino=None,
+            status=StatusArquivo.ERRO, erro="falha no processamento", avisos=[],
+        ),
+        ResultadoArquivo(
+            origem=tmp_path / "d.pdf", destino=None,
+            status=StatusArquivo.IGNORADO, erro=None, avisos=[],
+        ),
+    ]
+
+    with (
+        patch("core.batch.batch_convert", return_value=resultados),
+        patch("core.cli.Progress"),
+    ):
+        result = runner.invoke(app, ["converter", str(origem), str(tmp_path), "--json"])
+
+    assert result.exit_code == 0
+    linhas = [json.loads(linha) for linha in result.stdout.splitlines() if linha.strip().startswith("{")]
+    assert len(linhas) == 4
+    por_status: dict[str, list[dict]] = {}
+    for linha in linhas:
+        por_status.setdefault(linha["status"], []).append(linha)
+
+    ids_concluidos = {item["id"] for item in por_status["concluido"]}
+    assert ids_concluidos == {str(tmp_path / "a.pdf"), str(tmp_path / "b.pdf")}
+    assert all(item["erro"] is None for item in por_status["concluido"])
+    assert all(item["avisos"] == [] for item in por_status["concluido"][:1])
+    # mesmo status com aviso → campo avisos preenchido
+    assert "palavra quebrada por hifenização" in por_status["concluido"][1]["avisos"]
+    assert por_status["erro"][0]["erro"] == "falha no processamento"
+    assert "destino" not in por_status["erro"][0]  # contrato: id/status/erro/avisos
+    assert por_status["ignorado"][0]["status"] == "ignorado"
+
+
+def test_cli_converter_json_sem_traceback_extra(tmp_path):
+    """--json emite APENAS as linhas JSON no stdout (sem ruído/Progress)."""
+    from core.batch import ResultadoArquivo, StatusArquivo
+
+    origem = tmp_path / "documento.docx"
+    origem.write_text("dummy")
+    resultados = [
+        ResultadoArquivo(
+            origem=tmp_path / "a.pdf", destino=tmp_path / "a.md",
+            status=StatusArquivo.CONCLUIDO, erro=None, avisos=[],
+        )
+    ]
+
+    with (
+        patch("core.batch.batch_convert", return_value=resultados),
+        patch("core.cli.Progress"),
+    ):
+        result = runner.invoke(app, ["converter", str(origem), str(tmp_path), "--json"])
+
+    linhas = [linha for linha in result.stdout.splitlines() if linha.strip()]
+    assert len(linhas) == 1
+    assert json.loads(linhas[0])["status"] == "concluido"
+    assert "Traceback" not in result.output
+
+
+def test_cli_converter_tabela_com_aviso_e_sumario(tmp_path):
+    """Sem --json: tabela com status 'concluido⚠' + seção de avisos + sumário."""
+    from core.batch import ResultadoArquivo, StatusArquivo
+
+    origem = tmp_path / "documento.docx"
+    origem.write_text("dummy")
+    resultados = [
+        ResultadoArquivo(
+            origem=tmp_path / "a.pdf", destino=tmp_path / "a.md",
+            status=StatusArquivo.CONCLUIDO, erro=None,
+            avisos=["palavra quebrada por hifenização"],
+        ),
+        ResultadoArquivo(
+            origem=tmp_path / "b.pdf", destino=None,
+            status=StatusArquivo.ERRO, erro="falha no processamento", avisos=[],
+        ),
+    ]
+
+    with (
+        patch("core.batch.batch_convert", return_value=resultados),
+        patch("core.cli.Progress"),
+    ):
+        result = runner.invoke(app, ["converter", str(origem), str(tmp_path)])
+
+    saida = _sem_ansi(result.output)
+    assert result.exit_code == 0
+    assert "concluido" in saida
+    assert "Avisos de qualidade" in saida
+    assert "palavra quebrada por hifenização" in saida
+    assert "Total:" in saida and "Erros:" in saida and "OK:" in saida
+
+
+def test_cli_converter_tesseract_ausente_json(tmp_path):
+    """Tesseract ausente + --json → exit 1 com erro JSON limpo (contrato GUI)."""
+    origem = tmp_path / "documento.pdf"  # PDF → requer OCR
+    origem.write_bytes(b"%PDF-1.4 dummy")
+
+    with patch("core.image_converter.verificar_tesseract", return_value=False):
+        result = runner.invoke(app, ["converter", str(origem), str(tmp_path), "--json"])
+
+    assert result.exit_code == 1
+    linhas = [json.loads(linha) for linha in result.stdout.splitlines() if linha.strip().startswith("{")]
+    assert len(linhas) == 1
+    assert linhas[0]["status"] == "erro"
+    assert linhas[0]["id"] == str(origem)
+    assert "Tesseract não encontrado" in linhas[0]["erro"]
+    assert "Traceback" not in result.output
+
+
+def test_cli_converter_tesseract_ausente_sem_json(tmp_path):
+    """Tesseract ausente sem --json → exit 1 + mensagem de instalação."""
+    origem = tmp_path / "documento.pdf"
+    origem.write_bytes(b"%PDF-1.4 dummy")
+
+    with patch("core.image_converter.verificar_tesseract", return_value=False):
+        result = runner.invoke(app, ["converter", str(origem), str(tmp_path)])
+
+    assert result.exit_code == 1
+    assert "Tesseract não encontrado" in _sem_ansi(result.output)
+    assert "brew install tesseract" in _sem_ansi(result.output)
+
+
+def test_cli_converter_tesseract_ok_docx_nao_bloqueia(tmp_path):
+    """.docx não requer OCR → conversão segue mesmo com Tesseract ausente."""
+    origem = tmp_path / "documento.docx"
+    origem.write_text("dummy")
+
+    with (
+        patch("core.image_converter.verificar_tesseract", return_value=False),
+        patch("core.batch.batch_convert", return_value=[]),
+        patch("core.cli.Progress"),
+    ):
+        result = runner.invoke(app, ["converter", str(origem), str(tmp_path)])
+
+    assert result.exit_code == 0
+
+
+def test_cli_converter_vault_inexistente(tmp_path):
+    """--vault apontando para path inexistente → exit 1 + 'Vault inválido'."""
+    origem = tmp_path / "documento.docx"
+    origem.write_text("dummy")
+
+    result = runner.invoke(app, [
+        "converter", str(origem), str(tmp_path),
+        "--vault", str(tmp_path / "vault_nao_existe"),
+    ])
+
+    assert result.exit_code == 1
+    assert "Vault inválido" in _sem_ansi(result.output)
+
+
+def test_cli_converter_vault_arquivo_em_vez_de_diretorio(tmp_path):
+    """--vault apontando para um ARQUIVO → exit 1 + 'Vault inválido'."""
+    origem = tmp_path / "documento.docx"
+    origem.write_text("dummy")
+    arquivo = tmp_path / "nao_eh_pasta"
+    arquivo.write_text("sou um arquivo")
+
+    result = runner.invoke(app, [
+        "converter", str(origem), str(tmp_path), "--vault", str(arquivo),
+    ])
+
+    assert result.exit_code == 1
+    assert "Vault inválido" in _sem_ansi(result.output)
+
+
+def test_cli_converter_vault_traversal_rejeitado(tmp_path):
+    """--vault com path traversal → exit 1 + 'Erro de validação'."""
+    origem = tmp_path / "documento.docx"
+    origem.write_text("dummy")
+
+    result = runner.invoke(app, [
+        "converter", str(origem), str(tmp_path),
+        "--vault", str(tmp_path / ".." / ".." / "etc"),
+    ])
+
+    assert result.exit_code == 1
+    assert "Erro de validação" in _sem_ansi(result.output)
+
+
+def test_cli_converter_vault_valido_forca_obsidian(tmp_path):
+    """--vault válido → repassado ao batch_convert com obsidian=True."""
+    origem = tmp_path / "documento.docx"
+    origem.write_text("dummy")
+    vault_dir = tmp_path / "vault"
+    vault_dir.mkdir()
+
+    with (
+        patch("core.batch.batch_convert", return_value=[]) as batch_mock,
+        patch("core.cli.Progress"),
+    ):
+        result = runner.invoke(app, [
+            "converter", str(origem), str(tmp_path), "--vault", str(vault_dir),
+        ])
+
+    assert result.exit_code == 0
+    assert batch_mock.call_args.kwargs["vault"] == vault_dir
+    assert batch_mock.call_args.kwargs["obsidian"] is True
+
+
+# ── llm modelos / llm testar SEM --json (contrato de exit codes) ────────────
+
+def test_cli_llm_modelos_sem_json_falha_exit_1():
+    """Falha sem --json → exit 1 + dica (o JSON não é o contrato aqui)."""
+    with patch("core.llm_enhancer.listar_modelos", return_value=(None, "servidor inacessível")):
+        result = runner.invoke(app, ["llm", "modelos"])
+
+    assert result.exit_code == 1
+    saida = _sem_ansi(result.output)
+    assert "Falha ao listar modelos" in saida
+    assert "PDF2MD_LLM_URL" in saida
+
+
+def test_cli_llm_modelos_sem_json_nenhum_modelo():
+    """Endpoint OK mas lista vazia → exit 0 + 'Nenhum modelo'."""
+    with patch("core.llm_enhancer.listar_modelos", return_value=([], None)):
+        result = runner.invoke(app, ["llm", "modelos"])
+
+    assert result.exit_code == 0
+    assert "Nenhum modelo" in _sem_ansi(result.output)
+
+
+def test_cli_llm_modelos_sem_json_tabela():
+    """Lista com modelos → tabela renderizada com ids e coluna Visão."""
+    modelos = [{"id": "llama3.2-vision", "visao": True}, {"id": "llama3.1", "visao": None}]
+    with patch("core.llm_enhancer.listar_modelos", return_value=(modelos, None)):
+        result = runner.invoke(app, ["llm", "modelos"])
+
+    assert result.exit_code == 0
+    saida = _sem_ansi(result.output)
+    assert "llama3.2-vision" in saida
+    assert "llama3.1" in saida
+    assert "Visão" in saida
+
+
+def test_cli_llm_testar_sem_json_ok():
+    """testar OK sem --json → exit 0 + 'Conectado' com latência."""
+    with patch("core.llm_enhancer.testar", return_value={"ok": True, "latencia_ms": 42, "erro": None}):
+        result = runner.invoke(app, ["llm", "testar"])
+
+    assert result.exit_code == 0
+    saida = _sem_ansi(result.output)
+    assert "Conectado" in saida
+    assert "42ms" in saida
+
+
+def test_cli_llm_testar_sem_json_falha_exit_1():
+    """testar falha sem --json → exit 1 + 'Inacessível'."""
+    with patch(
+        "core.llm_enhancer.testar",
+        return_value={"ok": False, "latencia_ms": None, "erro": "HTTP 401"},
+    ):
+        result = runner.invoke(app, ["llm", "testar"])
+
+    assert result.exit_code == 1
+    saida = _sem_ansi(result.output)
+    assert "Inacessível" in saida
+    assert "HTTP 401" in saida
