@@ -143,6 +143,16 @@ struct ContentView: View {
                 // Progresso
                 if processador.estaProcessando {
                     barraProgresso
+                    // Feedback de tempo: conversão longa (OCR de scans) não
+                    // muda o contador de arquivos por minutos — o relógio
+                    // mostra que o app está vivo e trabalhando.
+                    if let inicio = processador.inicioConversao {
+                        TimelineView(.periodic(from: .now, by: 1)) { contexto in
+                            Text("Processando… \(BatchProcessor.formatarDuracao(contexto.date.timeIntervalSince(inicio)))")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
                 }
 
                 // Tempo total ao concluir
@@ -166,6 +176,17 @@ struct ContentView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(erroColagem ?? "")
+        }
+        // Alerta de erro fatal do processamento (FIX 2): binário ausente do
+        // bundle, destino/vault fora do home — falhas que antes ficavam só
+        // no console e deixavam a UI sem feedback.
+        .alert(
+            "Erro",
+            isPresented: Binding(get: { processador.erroFatal != nil }, set: { if !$0 { processador.erroFatal = nil } })
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(processador.erroFatal ?? "")
         }
     }
 
@@ -433,14 +454,23 @@ struct ContentView: View {
     private func handleDrop(providers: [NSItemProvider]) {
         for provider in providers {
             provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
-                if let data = item as? Data,
-                   let url = URL(dataRepresentation: data, relativeTo: nil) {
-                    DispatchQueue.main.async {
-                        self.adicionarSeNovo(url)
-                    }
+                guard let data = item as? Data,
+                      let url = URL(dataRepresentation: data, relativeTo: nil),
+                      Self.tipoSuportado(url) else {
+                    return
+                }
+                DispatchQueue.main.async {
+                    self.adicionarSeNovo(url)
                 }
             }
         }
+    }
+
+    /// FIX 5: drop aceitava qualquer UTType.fileURL (.app, .dmg… entravam na
+    /// lista e viravam "ignorado"). Filtra pelos MESMOS tipos do picker.
+    private static func tipoSuportado(_ url: URL) -> Bool {
+        guard let tipo = UTType(filenameExtension: url.pathExtension) else { return false }
+        return Self.tiposPermitidos.contains(tipo)
     }
 
     private func selecionarCaminho() {
@@ -475,8 +505,9 @@ struct ContentView: View {
     }
 
     private func cancelarConversao() {
+        // O ProcessRunner escuta o cancelamento da task: SIGTERM + fecha
+        // pipes + SIGKILL — a espera destrava na hora (ver ProcessRunner).
         tarefaConversao?.cancel()
-        processador.cancelar()
     }
 
     private func limpar() {
