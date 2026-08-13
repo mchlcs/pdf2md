@@ -59,14 +59,26 @@ _MOJIBAKE: list[tuple[str, str]] = _build_mojibake_table(_PT_BR_CHARS)
 # Strings de detecção rápida (só os padrões errados)
 _MOJIBAKE_DETECTORES: list[str] = [errado for errado, _ in _MOJIBAKE]
 
-# Regex compilado para detecção de mojibake em uma única passada
-# (antes: 24 chamadas de str.count, agora 1 chamada de re.findall)
+# Regex compilado para detecção E correção de mojibake em uma única passada
+# (antes: ~20× str.count + str.replace = ~40 travessias O(n); agora 1 regex).
 _MOJIBAKE_RE = re.compile("|".join(re.escape(p) for p in _MOJIBAKE_DETECTORES))
+_MOJIBAKE_PARA: dict[str, str] = dict(_MOJIBAKE)
 
 # Thresholds de validação (magic numbers nomeados)
 _MIN_KB_AVISO_CURTO = 10
 _MIN_CHARS_AVISO_CURTO = 100
 _MAX_SOFT_HYPHENS = 5
+
+# Tabela de tradução compilada para limpar_artefatos — 1 passada str.translate
+# (antes: 6× str.replace = 6 travessias O(n) do texto inteiro).
+_ARTEFATOS_TRADUCAO = str.maketrans({
+    "\u00ad": None,   # SOFT HYPHEN → remove
+    "\u200b": None,   # ZERO WIDTH SPACE → remove
+    "\u200c": None,   # ZERO WIDTH NON-JOINER → remove
+    "\u200d": None,   # ZERO WIDTH JOINER → remove
+    "\ufeff": None,   # BOM → remove
+    "\u00a0": " ",    # NO-BREAK SPACE → espaço normal
+})
 
 
 # ── 1a. Correção de mojibake (deve rodar ANTES de limpar_artefatos) ──────────
@@ -89,11 +101,15 @@ def corrigir_mojibake(texto: str) -> tuple[str, int]:
         (texto_corrigido, n_substituições_realizadas)
     """
     n_total = 0
-    for errado, correto in _MOJIBAKE:
-        count = texto.count(errado)
-        if count > 0:
-            texto = texto.replace(errado, correto)
-            n_total += count
+
+    def _substituir(m: re.Match[str]) -> str:
+        nonlocal n_total
+        n_total += 1
+        return _MOJIBAKE_PARA[m.group(0)]
+
+    # re.sub com callback: 1 passada O(n) para corrigir e contar tudo
+    # (antes: count+replace por padrão — ~40 travessias do texto inteiro).
+    texto = _MOJIBAKE_RE.sub(_substituir, texto)
     return texto, n_total
 
 
@@ -111,7 +127,9 @@ def limpar_artefatos(texto: str) -> str:
     - U+200B: ZERO WIDTH SPACE
     - U+200C: ZERO WIDTH NON-JOINER
     - U+200D: ZERO WIDTH JOINER
-    - U+FEFF: BOM mid-string (BOM no início é preservado; mid-string é artefato)
+    - U+FEFF: BOM — removido em qualquer posição (é artefato de encoding,
+      não conteúdo; o decode do leitor já consumiu o BOM inicial quando ele
+      existia no arquivo original)
     - U+00A0: NO-BREAK SPACE → espaço ASCII normal
     - Linhas que ficaram com só whitespace → linha vazia (preserva parágrafos)
 
@@ -121,12 +139,7 @@ def limpar_artefatos(texto: str) -> str:
     Returns:
         String limpa. Nunca modifica conteúdo semântico real.
     """
-    texto = texto.replace("\u00ad", "")   # SOFT HYPHEN
-    texto = texto.replace("\u200b", "")   # ZERO WIDTH SPACE
-    texto = texto.replace("\u200c", "")   # ZERO WIDTH NON-JOINER
-    texto = texto.replace("\u200d", "")   # ZERO WIDTH JOINER
-    texto = texto.replace("\ufeff", "")  # BOM mid-string
-    texto = texto.replace("\u00a0", " ") # NO-BREAK SPACE → espaço normal
+    texto = texto.translate(_ARTEFATOS_TRADUCAO)
 
     # Colapsa linhas que ficaram só com whitespace (preserva estrutura de parágrafos)
     linhas = [linha if linha.strip() else "" for linha in texto.split("\n")]

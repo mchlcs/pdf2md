@@ -86,6 +86,11 @@ def _sanitizar_celula_md(text: str) -> str:
     return text.strip().replace("\n", " ").replace("|", "\\|")
 
 
+def _linha_tabela_md(celulas: list[str]) -> str:
+    """Monta uma linha de tabela Markdown a partir de células já sanitizadas."""
+    return "| " + " | ".join(celulas) + " |"
+
+
 def validar_path_seguro(path: Path, base_permitida: Path | None = None) -> Path:
     """
     Valida que path não contém path traversal.

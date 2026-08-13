@@ -5,7 +5,7 @@ Estratégia: python-pptx → extrai título + corpo + tabelas por slide.
 from pathlib import Path
 from typing import Any
 
-from core.utils import _sanitizar_celula_md, _validar_existencia
+from core.utils import _linha_tabela_md, _sanitizar_celula_md, _validar_existencia
 
 
 def pptx_to_md(path: Path) -> str:
@@ -91,8 +91,8 @@ def _tabela_para_md(table: Any) -> str:
     linhas: list[str] = []
     for i, row in enumerate(table.rows):
         celulas = [_sanitizar_celula_md(cell.text) for cell in row.cells]
-        linhas.append("| " + " | ".join(celulas) + " |")
+        linhas.append(_linha_tabela_md(celulas))
         if i == 0:
-            linhas.append("| " + " | ".join(["---"] * len(celulas)) + " |")
+            linhas.append(_linha_tabela_md(["---"] * len(celulas)))
 
     return "\n".join(linhas)

@@ -395,9 +395,11 @@ def _executar_paralelo(
     if not tarefas:
         return []
 
-    resultados: list[ResultadoArquivo] = []
+    resultados_por_idx: dict[int, ResultadoArquivo] = {}
 
     with ThreadPoolExecutor(max_workers=workers) as executor:
+        # Dict future → índice original: `as_completed` devolve na ordem de
+        # conclusão, mas a tabela do CLI deve seguir a ordem de entrada.
         futures = {
             executor.submit(
                 _processar_arquivo,
@@ -405,27 +407,30 @@ def _executar_paralelo(
                 usar_llm, llm_fallback, ignorar_margens,
                 llm_config,
                 modo_imagem, str(assets_dir) if assets_dir else None,
-            ): (arq, dest)
-            for arq, dest in tarefas
+            ): idx
+            for idx, (arq, dest) in enumerate(tarefas)
         }
 
+        # Reordena por índice de entrada — a tabela do CLI fica determinística
+        # (antes: ordem de conclusão, variava entre runs).
         for future in as_completed(futures):
-            arq, _ = futures[future]
+            idx = futures[future]
+            arq, _ = tarefas[idx]
             try:
                 res = future.result()
-                resultados.append(ResultadoArquivo(
+                resultados_por_idx[idx] = ResultadoArquivo(
                     origem=Path(res["origem"]),
                     destino=Path(res["destino"]) if res["destino"] else None,
                     status=StatusArquivo(res["status"]),
                     erro=res["erro"],
                     avisos=res.get("avisos", []),
-                ))
+                )
             except Exception as exc:
-                resultados.append(ResultadoArquivo(
+                resultados_por_idx[idx] = ResultadoArquivo(
                     origem=arq,
                     destino=None,
                     status=StatusArquivo.ERRO,
                     erro=sanitizar_mensagem_erro(str(exc)),
-                ))
+                )
 
-    return resultados
+    return [resultados_por_idx[i] for i in range(len(tarefas))]
