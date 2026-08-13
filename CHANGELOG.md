@@ -48,6 +48,17 @@ Versioning follows [SemVer](https://semver.org/).
 - **Tabela do CLI determinística**: resultados em batch seguem a ordem de
   entrada (antes: ordem de conclusão do ThreadPool, variava entre runs) (#30).
 - **`_linha_tabela_md` extraído** (DRY pptx/xlsx) (#30).
+- **GUI: drop/picker aceitam .docx, .pptx e .xlsx de novo** — o filtro por
+  UTI hardcoded nunca casava com a resolução do LaunchServices (docx →
+  `org.openxmlformats.wordprocessingml.document` sem `officedocument.`);
+  filtro agora é por extensão, espelhando `EXTENSOES_PERMITIDAS` do core (#31).
+
+### Added
+
+- **Presets de LLM: OpenCode Zen** (`https://opencode.ai/zen/v1`), **OpenCode
+  Go** (`https://opencode.ai/zen/go/v1`) e **Ollama Cloud**
+  (`https://ollama.com/v1`) no fallback de qualidade — GUI (picker de
+  provider), docstring de env do CLI e README (#32).
 
 ### Testes
 
