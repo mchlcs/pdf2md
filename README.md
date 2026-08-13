@@ -14,7 +14,7 @@ Convert PDFs, images, Word, PPTX and spreadsheets to Markdown — batch processi
 | `.pptx` | python-pptx — slides, titles, tables |
 | `.xlsx` | openpyxl — each sheet becomes a Markdown table |
 | `.csv` | stdlib — BOM, UTF-8, Latin-1 support |
-| `.png` `.jpg` `.jpeg` `.tiff` `.webp` `.bmp` `.heic` | OCR via Tesseract |
+| `.png` `.jpg` `.jpeg` `.tiff` `.tif` `.webp` `.bmp` `.heic` | OCR via Tesseract |
 
 ## Requirement — Tesseract OCR
 
@@ -63,7 +63,7 @@ Enable the **AI Enhance** toggle to use an LLM when conversion detects quality i
 
 Configure the provider in the app's **Settings** window (pdf2md → Settings…): provider, model and API key. The model list is fetched live from the provider; if it's unreachable, a static list is shown. The API key is stored in the **macOS Keychain**, never in plain settings.
 
-Providers: Ollama (local), Gemini, Groq, OpenRouter, or a custom OpenAI-compatible URL.
+Providers: Ollama (local), Ollama Cloud, OpenCode Zen, OpenCode Go, Gemini, Groq, OpenRouter, or a custom OpenAI-compatible URL.
 
 ```bash
 brew install ollama
@@ -85,6 +85,9 @@ pdf2md spreadsheet.xlsx output/
 
 # Convert entire folder (parallel)
 pdf2md docs/ output/ --workers 8
+
+# Overwrite existing .md files (default: skip with "ignored" status)
+pdf2md docs/ output/ --sobrescrever
 
 # With Obsidian frontmatter
 pdf2md file.pdf output/ --obsidian
@@ -168,6 +171,7 @@ cd pdf2md
 uv sync --extra dev
 uv run pytest tests/ -v
 uv run ruff check core/ tests/
+uv run mypy core/
 ```
 
 ## Stack
@@ -181,7 +185,7 @@ uv run ruff check core/ tests/
 | DOC | `textutil` (native macOS) |
 | PPTX | `python-pptx` |
 | XLSX | `openpyxl` |
-| LLM fallback | OpenAI-compatible (Ollama/Gemini/Groq) via urllib |
+| LLM fallback | OpenAI-compatible (Ollama/Gemini/Groq/OpenRouter/OpenCode) via urllib |
 | CLI | `typer` + `rich` |
 | GUI | SwiftUI (macOS 13+) |
 | CI | GitHub Actions |
